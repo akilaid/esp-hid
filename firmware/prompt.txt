@@ -1,0 +1,73 @@
+You are an embedded systems engineer. Create Arduino firmware for an ESP32 that acts as a Bluetooth mouse using BLE HID.
+
+Goal:
+The ESP32 receives mouse commands from a PC via USB serial (UART) and forwards them as Bluetooth mouse movements to a paired device such as an Android phone.
+
+Requirements:
+
+Hardware:
+
+* ESP32 development board
+* Connected to PC via USB
+* Serial baud rate: 115200
+
+Bluetooth:
+
+* Use BLE HID
+* Device name: "PC Bridge Mouse"
+* Automatically start advertising on boot
+* Allow pairing with phones/tablets
+
+Libraries:
+
+* ESP32 BLE Mouse library (BleMouse)
+
+Serial Protocol:
+
+The ESP32 receives newline-separated commands from the PC.
+
+Movement command:
+MOVE dx dy
+
+Example:
+MOVE 5 -3
+
+Left click:
+CLICK LEFT
+
+Right click:
+CLICK RIGHT
+
+Scroll:
+SCROLL amount
+
+Example:
+SCROLL -1
+
+Release buttons:
+RELEASE
+
+Behavior:
+
+* Parse serial commands
+* Convert them into BLE mouse actions
+* MOVE should call bleMouse.move(dx, dy)
+* CLICK LEFT should press and release left button
+* CLICK RIGHT should press and release right button
+* SCROLL should call bleMouse.move(0,0,amount)
+
+Performance:
+
+* Handle rapid movement commands smoothly
+* Ignore malformed commands
+* Use a small input buffer for serial data
+
+Output:
+
+Provide complete Arduino code including:
+
+* includes
+* setup()
+* loop()
+* serial command parsing
+* BLE mouse initialization

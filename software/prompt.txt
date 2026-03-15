@@ -1,0 +1,61 @@
+You are a Go systems developer. Create a Windows Go program that captures mouse movement and sends it over serial to an ESP32 device.
+
+Goal:
+Turn the PC into a mouse event sender for an ESP32 Bluetooth HID bridge.
+
+Hardware:
+
+* ESP32 connected via USB serial
+
+Serial settings:
+
+* Port configurable (example: COM3)
+* Baud rate: 115200
+
+Requirements:
+
+1. Capture global mouse movement on Windows
+2. Calculate movement deltas (dx, dy)
+3. Send movement commands over serial using this format:
+
+MOVE dx dy
+
+Example:
+MOVE 3 -1
+
+4. Detect mouse clicks and send:
+
+CLICK LEFT
+CLICK RIGHT
+
+5. Detect scroll wheel and send:
+
+SCROLL amount
+
+6. Use a Go serial library such as:
+   github.com/bugst/go-serial
+
+7. Use a Windows input hook library such as:
+   github.com/go-vgo/robotgo
+
+Behavior:
+
+* Continuously track mouse movement
+* Send movement only when delta is non-zero
+* Limit send rate to about 120 events per second
+* Automatically reconnect if serial port disconnects
+
+Output:
+
+Provide full Go source code including:
+
+* serial initialization
+* mouse event capture
+* movement delta calculation
+* command formatting
+* error handling
+
+Also include instructions to build and run:
+
+go build
+./mousebridge.exe
