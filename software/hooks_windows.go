@@ -169,7 +169,7 @@ func publishRemoteModeEvent(out chan<- inputEvent, active bool, source string) {
 	})
 }
 
-func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uint32, out chan<- inputEvent) error {
+func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uint32, out chan<- inputEvent, remoteActivationAllowed func() bool) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -183,6 +183,24 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 	hotkeyDown := false
 	rightEdgeX := virtualRightEdgeX()
 	remoteAnchor := virtualCenterPoint()
+	activationAllowed := func() bool {
+		if remoteActivationAllowed == nil {
+			return true
+		}
+		return remoteActivationAllowed()
+	}
+	disableRemoteIfDisconnected := func() {
+		if !remoteModeActive {
+			return
+		}
+		if activationAllowed() {
+			return
+		}
+
+		remoteModeActive = false
+		edgeArmed = true
+		publishRemoteModeEvent(out, false, "serial")
+	}
 
 	mouseCallback := windows.NewCallback(func(nCode uintptr, wParam uintptr, lParam *msllHookStruct) uintptr {
 		lParamAddress := uintptr(0)
@@ -196,8 +214,12 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 				return next
 			}
 
+			disableRemoteIfDisconnected()
+
 			if !remoteModeActive && uint32(wParam) == wmMouseMove {
-				if lParam.Pt.X >= rightEdgeX-rightEdgeActivationThreshold {
+				if !activationAllowed() {
+					edgeArmed = true
+				} else if lParam.Pt.X >= rightEdgeX-rightEdgeActivationThreshold {
 					if edgeArmed {
 						remoteModeActive = true
 						edgeArmed = false
@@ -258,27 +280,35 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 				return next
 			}
 
+			disableRemoteIfDisconnected()
+
 			message := uint32(wParam)
 			isKeyDown := message == wmKeyDown || message == wmSysKeyDown
 			isKeyUp := message == wmKeyUp || message == wmSysKeyUp
 			isInjected := (lParam.Flags & llkhfInjected) != 0
 
 			if lParam.VkCode == toggleHotkeyVK && !isInjected {
+				consumeHotkey := remoteModeActive || activationAllowed()
+
 				if isKeyDown {
 					if !hotkeyDown {
 						hotkeyDown = true
-						remoteModeActive = !remoteModeActive
-						edgeArmed = false
-						publishRemoteModeEvent(out, remoteModeActive, "hotkey")
-						if remoteModeActive {
-							setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
+						if consumeHotkey {
+							remoteModeActive = !remoteModeActive
+							edgeArmed = false
+							publishRemoteModeEvent(out, remoteModeActive, "hotkey")
+							if remoteModeActive {
+								setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
+							}
 						}
 					}
 				} else if isKeyUp {
 					hotkeyDown = false
 				}
 
-				return 1
+				if consumeHotkey {
+					return 1
+				}
 			}
 
 			if remoteModeActive && captureKeyboard && !isInjected {

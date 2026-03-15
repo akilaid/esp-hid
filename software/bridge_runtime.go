@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 type bridgeRuntime struct {
@@ -48,17 +49,25 @@ func (runtime *bridgeRuntime) Start() error {
 	reporter := runtime.reporter
 	runtime.mu.Unlock()
 
-	emitBridgeEvent(reporter, bridgeEventStarting, cfg.portName, "bridge starting")
+	var serialConnected atomic.Bool
+	serialReporter := func(event bridgeEvent) {
+		updateSerialConnectionState(&serialConnected, event.Type)
+		if reporter != nil {
+			reporter(event)
+		}
+	}
+
+	emitBridgeEvent(serialReporter, bridgeEventStarting, cfg.portName, "bridge starting")
 
 	go func() {
-		writeLoop(ctx, cfg, commandQueue, reporter)
+		writeLoop(ctx, cfg, commandQueue, serialReporter)
 	}()
 
 	go func() {
 		defer close(done)
 
-		if err := runCaptureLoop(ctx, cfg, commandQueue); err != nil {
-			emitBridgeEvent(reporter, bridgeEventCaptureError, "", err.Error())
+		if err := runCaptureLoop(ctx, cfg, commandQueue, serialConnected.Load); err != nil {
+			emitBridgeEvent(serialReporter, bridgeEventCaptureError, "", err.Error())
 		}
 
 		enqueueCommand(commandQueue, "RELEASE")
@@ -72,7 +81,7 @@ func (runtime *bridgeRuntime) Start() error {
 		runtime.done = nil
 		runtime.mu.Unlock()
 
-		emitBridgeEvent(reporter, bridgeEventStopped, "", "bridge stopped")
+		emitBridgeEvent(serialReporter, bridgeEventStopped, "", "bridge stopped")
 	}()
 
 	// Trigger writer connection path quickly.

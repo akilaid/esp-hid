@@ -27,11 +27,27 @@ type guiApp struct {
 	toggleCombo      *walk.ComboBox
 	keyboardCheck    *walk.CheckBox
 	rateEdit         *walk.LineEdit
-	statusLabel      *walk.Label
+	statusWidget     *walk.CustomWidget
+	statusText       string
+	statusColor      walk.Color
 	activePortLabel  *walk.Label
 	startButton      *walk.PushButton
 	stopButton       *walk.PushButton
 }
+
+type connectionIndicatorState int
+
+const (
+	connectionIndicatorWaiting connectionIndicatorState = iota
+	connectionIndicatorConnected
+	connectionIndicatorFailed
+)
+
+var (
+	connectionDotColorConnected = walk.RGB(46, 185, 89)
+	connectionDotColorWaiting   = walk.RGB(209, 154, 30)
+	connectionDotColorFailed    = walk.RGB(214, 69, 65)
+)
 
 func runGUI(initial config) error {
 	deactivateActCtx, err := activateCommonControlsV6()
@@ -77,6 +93,8 @@ func runGUI(initial config) error {
 		}
 	}
 	app.setRunning(false)
+	app.setStatusText("Stopped")
+	app.setConnectionIndicator(connectionIndicatorWaiting)
 
 	go app.consumeEvents()
 	go app.backgroundRefresh()
@@ -86,6 +104,46 @@ func runGUI(initial config) error {
 	app.stopRuntimeAndWait()
 
 	return nil
+}
+
+func (app *guiApp) setConnectionIndicator(state connectionIndicatorState) {
+	switch state {
+	case connectionIndicatorConnected:
+		app.statusColor = connectionDotColorConnected
+	case connectionIndicatorFailed:
+		app.statusColor = connectionDotColorFailed
+	default:
+		app.statusColor = connectionDotColorWaiting
+	}
+
+	if app.statusWidget != nil {
+		app.statusWidget.Invalidate()
+	}
+}
+
+func (app *guiApp) setStatusText(text string) {
+	app.statusText = text
+
+	if app.statusWidget != nil {
+		app.statusWidget.Invalidate()
+	}
+}
+
+func (app *guiApp) paintStatusText(canvas *walk.Canvas, bounds walk.Rectangle) error {
+	if app.statusText == "" {
+		return nil
+	}
+
+	font := app.mw.Font()
+	if app.statusWidget != nil && app.statusWidget.Font() != nil {
+		font = app.statusWidget.Font()
+	}
+	if font == nil {
+		return nil
+	}
+
+	format := walk.TextLeft | walk.TextVCenter | walk.TextSingleLine | walk.TextEndEllipsis
+	return canvas.DrawTextPixels(app.statusText, font, app.statusColor, bounds, format)
 }
 
 func (app *guiApp) setupTray() error {
@@ -266,9 +324,11 @@ func (app *guiApp) buildWindow() error {
 					},
 					HSpacer{},
 					Label{Text: "Bridge:"},
-					Label{
-						AssignTo: &app.statusLabel,
-						Text:     "Stopped",
+					CustomWidget{
+						AssignTo:    &app.statusWidget,
+						PaintPixels: app.paintStatusText,
+						MinSize:     Size{Width: 98, Height: 18},
+						MaxSize:     Size{Width: 98, Height: 18},
 					},
 					Label{Text: "Connected Port:"},
 					Label{
@@ -299,7 +359,8 @@ func (app *guiApp) onStart() {
 	}
 
 	app.setRunning(true)
-	app.statusLabel.SetText("Starting")
+	app.setStatusText("Starting")
+	app.setConnectionIndicator(connectionIndicatorWaiting)
 }
 
 func (app *guiApp) onStop() {
@@ -342,25 +403,32 @@ func (app *guiApp) consumeEvents() {
 func (app *guiApp) applyEvent(event bridgeEvent) {
 	switch event.Type {
 	case bridgeEventStarting:
-		app.statusLabel.SetText("Starting")
+		app.setStatusText("Starting")
+		app.setConnectionIndicator(connectionIndicatorWaiting)
 	case bridgeEventStopping:
-		app.statusLabel.SetText("Stopping")
+		app.setStatusText("Stopping")
+		app.setConnectionIndicator(connectionIndicatorWaiting)
 	case bridgeEventStopped:
-		app.statusLabel.SetText("Stopped")
+		app.setStatusText("Stopped")
 		app.activePortLabel.SetText("-")
+		app.setConnectionIndicator(connectionIndicatorWaiting)
 		app.setRunning(false)
 	case bridgeEventSerialConnected:
-		app.statusLabel.SetText("Connected")
+		app.setStatusText("Connected")
 		if event.Port != "" {
 			app.activePortLabel.SetText(event.Port)
 		}
+		app.setConnectionIndicator(connectionIndicatorConnected)
 		app.setRunning(true)
 	case bridgeEventSerialOpenFailed:
-		app.statusLabel.SetText("Waiting for device")
+		app.setStatusText("Waiting for device")
+		app.setConnectionIndicator(connectionIndicatorFailed)
 	case bridgeEventSerialWriteError:
-		app.statusLabel.SetText("Connection issue")
+		app.setStatusText("Connection issue")
+		app.setConnectionIndicator(connectionIndicatorFailed)
 	case bridgeEventCaptureError:
-		app.statusLabel.SetText("Capture error")
+		app.setStatusText("Capture error")
+		app.setConnectionIndicator(connectionIndicatorFailed)
 	}
 }
 

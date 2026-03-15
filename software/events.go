@@ -137,7 +137,7 @@ func handleInputEvent(event inputEvent, accumulator *movementAccumulator, queue 
 	}
 }
 
-func runCaptureLoop(ctx context.Context, cfg config, queue chan string) error {
+func runCaptureLoop(ctx context.Context, cfg config, queue chan string, remoteActivationAllowed func() bool) error {
 	if cfg.moveRateHz <= 0 {
 		return errors.New("move rate must be greater than 0")
 	}
@@ -147,7 +147,7 @@ func runCaptureLoop(ctx context.Context, cfg config, queue chan string) error {
 	errorChannel := make(chan error, 1)
 
 	go func() {
-		errorChannel <- runInputHooks(ctx, cfg.captureKeyboard, cfg.toggleHotkeyVK, eventChannel)
+		errorChannel <- runInputHooks(ctx, cfg.captureKeyboard, cfg.toggleHotkeyVK, eventChannel, remoteActivationAllowed)
 		close(eventChannel)
 		close(errorChannel)
 	}()

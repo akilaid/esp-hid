@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -36,15 +37,19 @@ func runCLIBridge(cfg config) {
 	startupPortHint(cfg)
 
 	commandQueue := make(chan string, 1024)
+	var serialConnected atomic.Bool
+	serialReporter := func(event bridgeEvent) {
+		updateSerialConnectionState(&serialConnected, event.Type)
+	}
 
 	var writerWG sync.WaitGroup
 	writerWG.Add(1)
 	go func() {
 		defer writerWG.Done()
-		writeLoop(ctx, cfg, commandQueue, nil)
+		writeLoop(ctx, cfg, commandQueue, serialReporter)
 	}()
 
-	if err := runCaptureLoop(ctx, cfg, commandQueue); err != nil {
+	if err := runCaptureLoop(ctx, cfg, commandQueue, serialConnected.Load); err != nil {
 		log.Printf("capture loop stopped: %v", err)
 	}
 

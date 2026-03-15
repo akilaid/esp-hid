@@ -2,7 +2,10 @@
 
 package main
 
-import "time"
+import (
+	"sync/atomic"
+	"time"
+)
 
 type bridgeEventType string
 
@@ -25,6 +28,24 @@ type bridgeEvent struct {
 }
 
 type bridgeEventReporter func(event bridgeEvent)
+
+func updateSerialConnectionState(state *atomic.Bool, eventType bridgeEventType) {
+	if state == nil {
+		return
+	}
+
+	switch eventType {
+	case bridgeEventSerialConnected:
+		state.Store(true)
+	case bridgeEventStarting,
+		bridgeEventStopping,
+		bridgeEventStopped,
+		bridgeEventCaptureError,
+		bridgeEventSerialOpenFailed,
+		bridgeEventSerialWriteError:
+		state.Store(false)
+	}
+}
 
 func emitBridgeEvent(reporter bridgeEventReporter, eventType bridgeEventType, port string, message string) {
 	if reporter == nil {
