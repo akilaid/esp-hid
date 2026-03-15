@@ -48,6 +48,11 @@ const (
 	connectionIndicatorFailed
 )
 
+const (
+	iconResourceIDApp        = 1
+	iconResourceIDRemoteMode = 2
+)
+
 var (
 	connectionDotColorConnected = walk.RGB(46, 185, 89)
 	connectionDotColorWaiting   = walk.RGB(209, 154, 30)
@@ -123,7 +128,7 @@ func (app *guiApp) applyWindowIcon() {
 		return
 	}
 
-	if icon := app.loadIconFromCandidates("app.ico"); icon != nil {
+	if icon := app.loadIconFromResourceOrFile(iconResourceIDApp, "app.ico"); icon != nil {
 		if err := app.mw.SetIcon(icon); err != nil {
 			icon.Dispose()
 		} else {
@@ -131,7 +136,15 @@ func (app *guiApp) applyWindowIcon() {
 		}
 	}
 
-	app.remoteModeIcon = app.loadIconFromCandidates("on.ico")
+	app.remoteModeIcon = app.loadIconFromResourceOrFile(iconResourceIDRemoteMode, "on.ico")
+}
+
+func (app *guiApp) loadIconFromResourceOrFile(resourceID int, iconName string) *walk.Icon {
+	if icon, err := walk.NewIconFromResourceId(resourceID); err == nil {
+		return icon
+	}
+
+	return app.loadIconFromCandidates(iconName)
 }
 
 func (app *guiApp) loadIconFromCandidates(iconName string) *walk.Icon {

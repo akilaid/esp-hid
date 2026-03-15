@@ -67,8 +67,6 @@ jobs:
 
           New-Item -ItemType Directory -Path $bundleDir -Force | Out-Null
           Copy-Item software/esp-hid-bridge.exe "$bundleDir/"
-          Copy-Item software/app.ico "$bundleDir/"
-          Copy-Item software/on.ico "$bundleDir/"
 
           Compress-Archive -Path "$bundleDir/*" -DestinationPath $zipName -Force
 
