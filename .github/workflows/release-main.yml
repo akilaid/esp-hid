@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -36,11 +39,40 @@ jobs:
         id: meta
         shell: pwsh
         run: |
-          $shortSha = "${env:GITHUB_SHA}".Substring(0, 7)
-          $tag = "main-build-${env:GITHUB_RUN_NUMBER}-$shortSha"
-          $name = "Main build ${env:GITHUB_RUN_NUMBER} ($shortSha)"
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "name=$name" >> $env:GITHUB_OUTPUT
+          $latest = git tag --list "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | Select-Object -First 1
+
+          if (-not $latest) {
+            $nextTag = "v1.0.0"
+          } else {
+            if ($latest -notmatch '^v(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$') {
+              throw "Latest semantic version tag '$latest' is not in vMAJOR.MINOR.PATCH format"
+            }
+
+            $major = [int]$Matches.major
+            $minor = [int]$Matches.minor
+            $patch = [int]$Matches.patch + 1
+            $nextTag = "v$major.$minor.$patch"
+          }
+
+          "tag=$nextTag" >> $env:GITHUB_OUTPUT
+          "name=Release $nextTag" >> $env:GITHUB_OUTPUT
+
+      - name: Package release bundle
+        id: package
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $bundleDir = "release-bundle"
+          $zipName = "esp-hid-bridge-$tag-windows-x64.zip"
+
+          New-Item -ItemType Directory -Path $bundleDir -Force | Out-Null
+          Copy-Item software/esp-hid-bridge.exe "$bundleDir/"
+          Copy-Item software/app.ico "$bundleDir/"
+          Copy-Item software/on.ico "$bundleDir/"
+
+          Compress-Archive -Path "$bundleDir/*" -DestinationPath $zipName -Force
+
+          "zip=$zipName" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -51,4 +83,4 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            software/esp-hid-bridge.exe
+            ${{ steps.package.outputs.zip }}
