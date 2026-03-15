@@ -15,11 +15,15 @@ type inputEventKind int
 
 const (
 	inputMouseMoveEvent inputEventKind = iota + 1
-	inputMouseLeftClickEvent
-	inputMouseRightClickEvent
+	inputMouseDeltaEvent
+	inputMouseLeftDownEvent
+	inputMouseLeftUpEvent
+	inputMouseRightDownEvent
+	inputMouseRightUpEvent
 	inputMouseScrollEvent
 	inputKeyboardDownEvent
 	inputKeyboardUpEvent
+	inputRemoteModeChangedEvent
 )
 
 type inputEvent struct {
@@ -28,6 +32,8 @@ type inputEvent struct {
 	y       int
 	scroll  int
 	keyCode uint8
+	active  bool
+	source  string
 }
 
 type movementAccumulator struct {
@@ -56,6 +62,14 @@ func (a *movementAccumulator) addAbsolutePosition(x, y int) {
 	a.lastY = y
 }
 
+func (a *movementAccumulator) addDelta(dx, dy int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.pendingDX += dx
+	a.pendingDY += dy
+}
+
 func (a *movementAccumulator) drain() (int, int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -65,6 +79,15 @@ func (a *movementAccumulator) drain() (int, int) {
 	a.pendingDX = 0
 	a.pendingDY = 0
 	return dx, dy
+}
+
+func (a *movementAccumulator) reset() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.initialized = false
+	a.pendingDX = 0
+	a.pendingDY = 0
 }
 
 func enqueueCommand(queue chan string, command string) {
@@ -93,10 +116,16 @@ func handleInputEvent(event inputEvent, accumulator *movementAccumulator, queue 
 	switch event.kind {
 	case inputMouseMoveEvent:
 		accumulator.addAbsolutePosition(event.x, event.y)
-	case inputMouseLeftClickEvent:
-		enqueueCommand(queue, "CLICK LEFT")
-	case inputMouseRightClickEvent:
-		enqueueCommand(queue, "CLICK RIGHT")
+	case inputMouseDeltaEvent:
+		accumulator.addDelta(event.x, event.y)
+	case inputMouseLeftDownEvent:
+		enqueueCommand(queue, "MOUSEDOWN LEFT")
+	case inputMouseLeftUpEvent:
+		enqueueCommand(queue, "MOUSEUP LEFT")
+	case inputMouseRightDownEvent:
+		enqueueCommand(queue, "MOUSEDOWN RIGHT")
+	case inputMouseRightUpEvent:
+		enqueueCommand(queue, "MOUSEUP RIGHT")
 	case inputMouseScrollEvent:
 		if event.scroll != 0 {
 			enqueueCommand(queue, fmt.Sprintf("SCROLL %d", event.scroll))
@@ -144,6 +173,16 @@ func runCaptureLoop(ctx context.Context, cfg config, queue chan string) error {
 			if !ok {
 				return nil
 			}
+
+			if event.kind == inputRemoteModeChangedEvent {
+				accumulator.reset()
+				if !event.active {
+					enqueueCommand(queue, "RELEASE")
+					enqueueCommand(queue, "KEYRELEASE")
+				}
+				continue
+			}
+
 			handleInputEvent(event, accumulator, queue)
 		}
 	}

@@ -7,6 +7,8 @@ namespace {
 
 constexpr const char* kCmdMove = "MOVE";
 constexpr const char* kCmdClick = "CLICK";
+constexpr const char* kCmdMouseDown = "MOUSEDOWN";
+constexpr const char* kCmdMouseUp = "MOUSEUP";
 constexpr const char* kCmdScroll = "SCROLL";
 constexpr const char* kCmdKeyDown = "KEYDOWN";
 constexpr const char* kCmdKeyUp = "KEYUP";
@@ -15,6 +17,7 @@ constexpr const char* kCmdRelease = "RELEASE";
 
 constexpr const char* kClickLeft = "LEFT";
 constexpr const char* kClickRight = "RIGHT";
+constexpr const char* kClickMiddle = "MIDDLE";
 
 char* trimWhitespace(char* text) {
   while (*text != '\0' && isspace(static_cast<unsigned char>(*text))) {
@@ -100,6 +103,29 @@ bool parseKeyCode(const char* args, uint8_t* keyCodeOut) {
   return true;
 }
 
+bool parseMouseButton(const char* args, uint8_t* buttonOut) {
+  if (args == nullptr || buttonOut == nullptr) {
+    return false;
+  }
+
+  if (strcmp(args, kClickLeft) == 0) {
+    *buttonOut = MOUSE_LEFT;
+    return true;
+  }
+
+  if (strcmp(args, kClickRight) == 0) {
+    *buttonOut = MOUSE_RIGHT;
+    return true;
+  }
+
+  if (strcmp(args, kClickMiddle) == 0) {
+    *buttonOut = MOUSE_MIDDLE;
+    return true;
+  }
+
+  return false;
+}
+
 void executeMove(const char* args) {
   if (!hidConnected() || args == nullptr) {
     return;
@@ -132,6 +158,36 @@ void executeClick(const char* args) {
     Mouse.click(MOUSE_RIGHT);
     return;
   }
+
+  if (strcmp(args, kClickMiddle) == 0) {
+    Mouse.click(MOUSE_MIDDLE);
+  }
+}
+
+void executeMouseDown(const char* args) {
+  if (!hidConnected() || args == nullptr) {
+    return;
+  }
+
+  uint8_t button = 0;
+  if (!parseMouseButton(args, &button)) {
+    return;
+  }
+
+  Mouse.press(button);
+}
+
+void executeMouseUp(const char* args) {
+  if (!hidConnected() || args == nullptr) {
+    return;
+  }
+
+  uint8_t button = 0;
+  if (!parseMouseButton(args, &button)) {
+    return;
+  }
+
+  Mouse.release(button);
 }
 
 void executeScroll(const char* args) {
@@ -231,6 +287,16 @@ void dispatchCommand(const CommandFrame& frame) {
 
   if (strcmp(frame.command, kCmdClick) == 0) {
     executeClick(frame.args);
+    return;
+  }
+
+  if (strcmp(frame.command, kCmdMouseDown) == 0) {
+    executeMouseDown(frame.args);
+    return;
+  }
+
+  if (strcmp(frame.command, kCmdMouseUp) == 0) {
+    executeMouseUp(frame.args);
     return;
   }
 
