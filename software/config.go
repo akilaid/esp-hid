@@ -22,6 +22,7 @@ type config struct {
 	moveRateHz      int
 	reconnectDelay  time.Duration
 	captureKeyboard bool
+	guiMode         bool
 }
 
 func parseConfig() (config, error) {
@@ -30,6 +31,7 @@ func parseConfig() (config, error) {
 	rate := flag.Int("rate", 60, "Maximum move send rate (events per second)")
 	reconnect := flag.Duration("reconnect", 750*time.Millisecond, "Reconnect delay after serial failure")
 	keyboard := flag.Bool("keyboard", true, "Capture and forward keyboard key down/up events")
+	gui := flag.Bool("gui", true, "Run with native Windows GUI")
 	flag.Parse()
 
 	autoPort := strings.EqualFold(*port, "auto")
@@ -41,6 +43,7 @@ func parseConfig() (config, error) {
 		moveRateHz:      *rate,
 		reconnectDelay:  *reconnect,
 		captureKeyboard: *keyboard,
+		guiMode:         *gui,
 	}
 
 	if cfg.portName == "" && !cfg.autoPort {

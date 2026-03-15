@@ -17,6 +17,18 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 
+	if cfg.guiMode {
+		if err := runGUI(cfg); err != nil {
+			log.Fatalf("gui failed: %v", err)
+		}
+		return
+	}
+
+	runCLIBridge(cfg)
+}
+
+func runCLIBridge(cfg config) {
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -29,7 +41,7 @@ func main() {
 	writerWG.Add(1)
 	go func() {
 		defer writerWG.Done()
-		writeLoop(ctx, cfg, commandQueue)
+		writeLoop(ctx, cfg, commandQueue, nil)
 	}()
 
 	if err := runCaptureLoop(ctx, cfg, commandQueue); err != nil {
