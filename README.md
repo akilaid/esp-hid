@@ -102,6 +102,7 @@ Bridge status in GUI:
 - Remote mode can be activated by:
 	- moving cursor to the right screen edge, or
 	- pressing toggle hotkey (default `F9`, configurable `F1`-`F12`).
+- While remote mode is active, sustained leftward movement automatically returns control to the host and places the host cursor near the activating screen edge.
 - Toggle hotkey only works when serial connection is healthy.
 - If serial drops while remote mode is active, remote mode is disabled and release commands are sent.
 
