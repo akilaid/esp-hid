@@ -49,7 +49,7 @@ func runCLIBridge(cfg config) {
 		writeLoop(ctx, cfg, commandQueue, serialReporter)
 	}()
 
-	if err := runCaptureLoop(ctx, cfg, commandQueue, serialConnected.Load); err != nil {
+	if err := runCaptureLoop(ctx, cfg, commandQueue, serialConnected.Load, nil); err != nil {
 		log.Printf("capture loop stopped: %v", err)
 	}
 

@@ -18,6 +18,8 @@ const (
 	bridgeEventSerialConnected  bridgeEventType = "serial_connected"
 	bridgeEventSerialOpenFailed bridgeEventType = "serial_open_failed"
 	bridgeEventSerialWriteError bridgeEventType = "serial_write_error"
+	bridgeEventRemoteModeOn     bridgeEventType = "remote_mode_on"
+	bridgeEventRemoteModeOff    bridgeEventType = "remote_mode_off"
 )
 
 type bridgeEvent struct {

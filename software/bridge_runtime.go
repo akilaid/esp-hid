@@ -66,7 +66,7 @@ func (runtime *bridgeRuntime) Start() error {
 	go func() {
 		defer close(done)
 
-		if err := runCaptureLoop(ctx, cfg, commandQueue, serialConnected.Load); err != nil {
+		if err := runCaptureLoop(ctx, cfg, commandQueue, serialConnected.Load, serialReporter); err != nil {
 			emitBridgeEvent(serialReporter, bridgeEventCaptureError, "", err.Error())
 		}
 

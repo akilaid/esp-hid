@@ -137,7 +137,7 @@ func handleInputEvent(event inputEvent, accumulator *movementAccumulator, queue 
 	}
 }
 
-func runCaptureLoop(ctx context.Context, cfg config, queue chan string, remoteActivationAllowed func() bool) error {
+func runCaptureLoop(ctx context.Context, cfg config, queue chan string, remoteActivationAllowed func() bool, reporter bridgeEventReporter) error {
 	if cfg.moveRateHz <= 0 {
 		return errors.New("move rate must be greater than 0")
 	}
@@ -175,6 +175,12 @@ func runCaptureLoop(ctx context.Context, cfg config, queue chan string, remoteAc
 			}
 
 			if event.kind == inputRemoteModeChangedEvent {
+				eventType := bridgeEventRemoteModeOff
+				if event.active {
+					eventType = bridgeEventRemoteModeOn
+				}
+				emitBridgeEvent(reporter, eventType, "", event.source)
+
 				accumulator.reset()
 				if !event.active {
 					enqueueCommand(queue, "RELEASE")

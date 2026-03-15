@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +24,10 @@ type guiApp struct {
 
 	mw               *walk.MainWindow
 	trayIcon         *walk.NotifyIcon
+	appIcon          *walk.Icon
+	remoteModeIcon   *walk.Icon
 	trayFallbackIcon *walk.Icon
+	remoteModeActive bool
 	portCombo        *walk.ComboBox
 	toggleCombo      *walk.ComboBox
 	keyboardCheck    *walk.CheckBox
@@ -66,6 +71,8 @@ func runGUI(initial config) error {
 		return err
 	}
 
+	app.applyWindowIcon()
+
 	if err := app.setupTray(); err != nil {
 		if app.mw != nil {
 			app.mw.Dispose()
@@ -99,11 +106,79 @@ func runGUI(initial config) error {
 	go app.consumeEvents()
 	go app.backgroundRefresh()
 
+	if err := app.startBridge(false); err != nil {
+		app.setStatusText("Start failed")
+		app.setConnectionIndicator(connectionIndicatorFailed)
+	}
+
 	app.mw.Run()
 	close(app.eventStop)
 	app.stopRuntimeAndWait()
 
 	return nil
+}
+
+func (app *guiApp) applyWindowIcon() {
+	if app.mw == nil {
+		return
+	}
+
+	if icon := app.loadIconFromCandidates("app.ico"); icon != nil {
+		if err := app.mw.SetIcon(icon); err != nil {
+			icon.Dispose()
+		} else {
+			app.appIcon = icon
+		}
+	}
+
+	app.remoteModeIcon = app.loadIconFromCandidates("on.ico")
+}
+
+func (app *guiApp) loadIconFromCandidates(iconName string) *walk.Icon {
+	iconCandidates := []string{
+		iconName,
+		filepath.Join("software", iconName),
+	}
+
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		iconCandidates = append(iconCandidates,
+			filepath.Join(exeDir, iconName),
+			filepath.Join(exeDir, "software", iconName),
+		)
+	}
+
+	for _, iconPath := range iconCandidates {
+		icon, err := walk.NewIconFromFile(iconPath)
+		if err != nil {
+			continue
+		}
+		return icon
+	}
+
+	return nil
+}
+
+func (app *guiApp) setTrayIconForRemoteMode(active bool) {
+	app.remoteModeActive = active
+
+	if app.trayIcon == nil {
+		return
+	}
+
+	if active && app.remoteModeIcon != nil {
+		_ = app.trayIcon.SetIcon(app.remoteModeIcon)
+		return
+	}
+
+	if icon := app.mw.Icon(); icon != nil {
+		_ = app.trayIcon.SetIcon(icon)
+		return
+	}
+
+	if app.trayFallbackIcon != nil {
+		_ = app.trayIcon.SetIcon(app.trayFallbackIcon)
+	}
 }
 
 func (app *guiApp) setConnectionIndicator(state connectionIndicatorState) {
@@ -216,6 +291,8 @@ func (app *guiApp) setupTray() error {
 		return fail(fmt.Errorf("show tray icon: %w", err))
 	}
 
+	app.setTrayIconForRemoteMode(app.remoteModeActive)
+
 	return nil
 }
 
@@ -223,6 +300,16 @@ func (app *guiApp) disposeTray() {
 	if app.trayIcon != nil {
 		_ = app.trayIcon.Dispose()
 		app.trayIcon = nil
+	}
+
+	if app.appIcon != nil {
+		app.appIcon.Dispose()
+		app.appIcon = nil
+	}
+
+	if app.remoteModeIcon != nil {
+		app.remoteModeIcon.Dispose()
+		app.remoteModeIcon = nil
 	}
 
 	if app.trayFallbackIcon != nil {
@@ -342,25 +429,35 @@ func (app *guiApp) buildWindow() error {
 }
 
 func (app *guiApp) onStart() {
+	_ = app.startBridge(true)
+}
+
+func (app *guiApp) startBridge(showErrorDialog bool) error {
 	cfg, err := app.readConfigFromForm()
 	if err != nil {
-		walk.MsgBox(app.mw, "Invalid Settings", err.Error(), walk.MsgBoxIconError)
-		return
+		if showErrorDialog {
+			walk.MsgBox(app.mw, "Invalid Settings", err.Error(), walk.MsgBoxIconError)
+		}
+		return err
 	}
 
 	if app.runtime != nil && app.runtime.Running() {
-		return
+		return nil
 	}
 
 	app.runtime = newBridgeRuntime(cfg, app.pushEvent)
 	if err := app.runtime.Start(); err != nil {
-		walk.MsgBox(app.mw, "Start Failed", err.Error(), walk.MsgBoxIconError)
-		return
+		if showErrorDialog {
+			walk.MsgBox(app.mw, "Start Failed", err.Error(), walk.MsgBoxIconError)
+		}
+		return err
 	}
 
 	app.setRunning(true)
 	app.setStatusText("Starting")
 	app.setConnectionIndicator(connectionIndicatorWaiting)
+
+	return nil
 }
 
 func (app *guiApp) onStop() {
@@ -403,12 +500,15 @@ func (app *guiApp) consumeEvents() {
 func (app *guiApp) applyEvent(event bridgeEvent) {
 	switch event.Type {
 	case bridgeEventStarting:
+		app.setTrayIconForRemoteMode(false)
 		app.setStatusText("Starting")
 		app.setConnectionIndicator(connectionIndicatorWaiting)
 	case bridgeEventStopping:
+		app.setTrayIconForRemoteMode(false)
 		app.setStatusText("Stopping")
 		app.setConnectionIndicator(connectionIndicatorWaiting)
 	case bridgeEventStopped:
+		app.setTrayIconForRemoteMode(false)
 		app.setStatusText("Stopped")
 		app.activePortLabel.SetText("-")
 		app.setConnectionIndicator(connectionIndicatorWaiting)
@@ -429,6 +529,10 @@ func (app *guiApp) applyEvent(event bridgeEvent) {
 	case bridgeEventCaptureError:
 		app.setStatusText("Capture error")
 		app.setConnectionIndicator(connectionIndicatorFailed)
+	case bridgeEventRemoteModeOn:
+		app.setTrayIconForRemoteMode(true)
+	case bridgeEventRemoteModeOff:
+		app.setTrayIconForRemoteMode(false)
 	}
 }
 

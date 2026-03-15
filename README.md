@@ -60,8 +60,17 @@ From `software/`:
 
 ```powershell
 go mod tidy
-go build -o esp-hid-bridge.exe .
+# Production GUI build (no terminal window when opening the EXE)
+go build -trimpath -ldflags "-H=windowsgui -s -w" -o esp-hid-bridge.exe .
 ```
+
+Optional helper script:
+
+```powershell
+.\build-production.ps1
+```
+
+If you run `go build .`, Go produces a console-subsystem EXE (`software.exe`) which opens a terminal window.
 
 Run GUI mode (default):
 
