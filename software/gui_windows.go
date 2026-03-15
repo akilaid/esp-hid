@@ -18,16 +18,19 @@ type guiApp struct {
 
 	statusCh  chan bridgeEvent
 	eventStop chan struct{}
+	exiting   bool
 
-	mw              *walk.MainWindow
-	portCombo       *walk.ComboBox
-	toggleCombo     *walk.ComboBox
-	keyboardCheck   *walk.CheckBox
-	rateEdit        *walk.LineEdit
-	statusLabel     *walk.Label
-	activePortLabel *walk.Label
-	startButton     *walk.PushButton
-	stopButton      *walk.PushButton
+	mw               *walk.MainWindow
+	trayIcon         *walk.NotifyIcon
+	trayFallbackIcon *walk.Icon
+	portCombo        *walk.ComboBox
+	toggleCombo      *walk.ComboBox
+	keyboardCheck    *walk.CheckBox
+	rateEdit         *walk.LineEdit
+	statusLabel      *walk.Label
+	activePortLabel  *walk.Label
+	startButton      *walk.PushButton
+	stopButton       *walk.PushButton
 }
 
 func runGUI(initial config) error {
@@ -46,6 +49,23 @@ func runGUI(initial config) error {
 	if err := app.buildWindow(); err != nil {
 		return err
 	}
+
+	if err := app.setupTray(); err != nil {
+		if app.mw != nil {
+			app.mw.Dispose()
+		}
+		return err
+	}
+	defer app.disposeTray()
+
+	app.mw.Closing().Attach(func(canceled *bool, _ walk.CloseReason) {
+		if app.exiting {
+			return
+		}
+
+		*canceled = true
+		app.hideWindowToTray()
+	})
 
 	app.refreshPorts()
 	if app.toggleCombo != nil {
@@ -68,12 +88,126 @@ func runGUI(initial config) error {
 	return nil
 }
 
+func (app *guiApp) setupTray() error {
+	if app.mw == nil {
+		return fmt.Errorf("main window is not initialized")
+	}
+
+	tray, err := walk.NewNotifyIcon(app.mw)
+	if err != nil {
+		return fmt.Errorf("create tray icon: %w", err)
+	}
+
+	fail := func(inner error) error {
+		_ = tray.Dispose()
+		return inner
+	}
+
+	app.trayIcon = tray
+
+	if icon := app.mw.Icon(); icon != nil {
+		_ = tray.SetIcon(icon)
+	} else {
+		fallbackIcon, iconErr := walk.NewIconFromSysDLL("shell32", 3)
+		if iconErr == nil {
+			app.trayFallbackIcon = fallbackIcon
+			_ = tray.SetIcon(fallbackIcon)
+		}
+	}
+
+	if err := tray.SetToolTip("ESP HID Bridge"); err != nil {
+		app.trayIcon = nil
+		return fail(fmt.Errorf("set tray tooltip: %w", err))
+	}
+
+	tray.MouseDown().Attach(func(_ int, _ int, button walk.MouseButton) {
+		if button == walk.LeftButton {
+			app.showWindowFromTray()
+		}
+	})
+
+	openAction := walk.NewAction()
+	if err := openAction.SetText("Open"); err != nil {
+		app.trayIcon = nil
+		return fail(fmt.Errorf("create tray open action: %w", err))
+	}
+	openAction.Triggered().Attach(app.showWindowFromTray)
+
+	exitAction := walk.NewAction()
+	if err := exitAction.SetText("Exit"); err != nil {
+		app.trayIcon = nil
+		return fail(fmt.Errorf("create tray exit action: %w", err))
+	}
+	exitAction.Triggered().Attach(app.requestExit)
+
+	if err := tray.ContextMenu().Actions().Add(openAction); err != nil {
+		app.trayIcon = nil
+		return fail(fmt.Errorf("add tray open action: %w", err))
+	}
+	if err := tray.ContextMenu().Actions().Add(walk.NewSeparatorAction()); err != nil {
+		app.trayIcon = nil
+		return fail(fmt.Errorf("add tray separator action: %w", err))
+	}
+	if err := tray.ContextMenu().Actions().Add(exitAction); err != nil {
+		app.trayIcon = nil
+		return fail(fmt.Errorf("add tray exit action: %w", err))
+	}
+
+	if err := tray.SetVisible(true); err != nil {
+		app.trayIcon = nil
+		return fail(fmt.Errorf("show tray icon: %w", err))
+	}
+
+	return nil
+}
+
+func (app *guiApp) disposeTray() {
+	if app.trayIcon != nil {
+		_ = app.trayIcon.Dispose()
+		app.trayIcon = nil
+	}
+
+	if app.trayFallbackIcon != nil {
+		app.trayFallbackIcon.Dispose()
+		app.trayFallbackIcon = nil
+	}
+}
+
+func (app *guiApp) showWindowFromTray() {
+	if app.mw == nil {
+		return
+	}
+
+	app.mw.Show()
+	_ = app.mw.BringToTop()
+	_ = app.mw.Activate()
+	_ = app.mw.SetFocus()
+}
+
+func (app *guiApp) hideWindowToTray() {
+	if app.mw == nil {
+		return
+	}
+
+	app.mw.Hide()
+}
+
+func (app *guiApp) requestExit() {
+	if app.mw == nil {
+		return
+	}
+
+	app.exiting = true
+	_ = app.mw.Close()
+}
+
 func (app *guiApp) buildWindow() error {
 	return MainWindow{
 		AssignTo: &app.mw,
 		Title:    "ESP HID Bridge",
 		MinSize:  Size{Width: 520, Height: 140},
 		Size:     Size{Width: 560, Height: 160},
+		Visible:  false,
 		Layout:   VBox{},
 		Children: []Widget{
 			Composite{
