@@ -1,0 +1,54 @@
+name: Build and Release (main)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: software/go.mod
+          cache-dependency-path: software/go.sum
+
+      - name: Build production executable
+        shell: pwsh
+        working-directory: software
+        run: ./build-production.ps1 -Output esp-hid-bridge.exe
+
+      - name: Prepare release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $shortSha = "${env:GITHUB_SHA}".Substring(0, 7)
+          $tag = "main-build-${env:GITHUB_RUN_NUMBER}-$shortSha"
+          $name = "Main build ${env:GITHUB_RUN_NUMBER} ($shortSha)"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            software/esp-hid-bridge.exe
