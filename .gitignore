@@ -2,3 +2,5 @@
 *.EXE
 *.exe
 software/rsrc_windows_*.syso
+/firmware/out
+/firmware/build

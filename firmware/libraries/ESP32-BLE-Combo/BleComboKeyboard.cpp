@@ -25,6 +25,11 @@
 #define MEDIA_KEYS_ID 0x02
 #define MOUSE_ID 0x03
 
+constexpr uint16_t kAdvertisedIntervalMin = 0x20;     // 20ms (BLE spec minimum advertising interval)
+constexpr uint16_t kAdvertisedIntervalMax = 0x40;     // 40ms
+constexpr uint16_t kPreferredConnIntervalMin = 0x06;  // 7.5ms
+constexpr uint16_t kPreferredConnIntervalMax = 0x12;  // 22.5ms
+
 static const uint8_t _hidReportDescriptor[] = {
   USAGE_PAGE(1),      0x01,          // USAGE_PAGE (Generic Desktop Ctrls)
   USAGE(1),           0x06,          // USAGE (Keyboard)
@@ -190,6 +195,10 @@ void BleComboKeyboard::taskServer(void* pvParameter) {
 
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
   pAdvertising->setAppearance(HID_KEYBOARD);
+	pAdvertising->setMinInterval(kAdvertisedIntervalMin);
+	pAdvertising->setMaxInterval(kAdvertisedIntervalMax);
+	pAdvertising->setMinPreferred(kPreferredConnIntervalMin);
+	pAdvertising->setMaxPreferred(kPreferredConnIntervalMax);
   pAdvertising->addServiceUUID(bleKeyboardInstance->hid->hidService()->getUUID());
   pAdvertising->start();
   bleKeyboardInstance->hid->setBatteryLevel(bleKeyboardInstance->batteryLevel);

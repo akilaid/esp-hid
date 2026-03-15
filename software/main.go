@@ -33,7 +33,7 @@ func runCLIBridge(cfg config) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	log.Printf("starting mouse/keyboard bridge: port=%s baud=%d rate=%dHz keyboard=%t", cfg.portName, cfg.baudRate, cfg.moveRateHz, cfg.captureKeyboard)
+	log.Printf("starting mouse/keyboard bridge: port=%s baud=%d rate=%dHz deadzone=%d smooth=%.2f adaptive=%t keyboard=%t", cfg.portName, cfg.baudRate, cfg.moveRateHz, cfg.moveDeadzone, cfg.moveSmoothing, cfg.adaptiveMoves, cfg.captureKeyboard)
 	startupPortHint(cfg)
 
 	commandQueue := make(chan string, 1024)

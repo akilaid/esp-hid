@@ -14,6 +14,12 @@ public:
   bool connected = false;
   void onConnect(BLEServer* pServer);
   void onDisconnect(BLEServer* pServer);
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param);
+  void onDisconnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param);
+#endif
+
   BLECharacteristic* inputKeyboard;
   BLECharacteristic* outputKeyboard;
   BLECharacteristic* inputMouse;

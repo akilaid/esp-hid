@@ -50,7 +50,7 @@ ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 ov
 
 Default firmware values:
 
-- Serial baud: `115200`.
+- Serial baud: `230400`.
 - BLE device name: `PC Bridge Combo`.
 - BLE manufacturer: `ESP HID Bridge`.
 
@@ -111,8 +111,11 @@ Bridge status in GUI:
 All flags apply to both GUI and CLI modes:
 
 - `-port`: serial port or `auto` (default `auto`).
-- `-baud`: serial baud rate (default `115200`).
-- `-rate`: movement send rate Hz (default `60`).
+- `-baud`: serial baud rate (default `230400`).
+- `-rate`: movement send rate Hz (default `45`).
+- `-deadzone`: ignore tiny move deltas up to this absolute value (default `1`, `0` disables).
+- `-smooth`: micro-smoothing factor for small movement (default `0.2`, range `[0, 1)`, `0` disables).
+- `-adaptive`: adapt move send cadence when serial queue is congested (default `true`).
 - `-reconnect`: reconnect delay after serial failure (default `750ms`).
 - `-keyboard`: forward keyboard events (default `true`).
 - `-toggle`: remote mode hotkey (`F1`-`F12`, default `F9`).

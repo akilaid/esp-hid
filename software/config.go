@@ -16,21 +16,27 @@ import (
 )
 
 type config struct {
-	portName        string
-	autoPort        bool
-	baudRate        int
-	moveRateHz      int
-	reconnectDelay  time.Duration
-	captureKeyboard bool
+	portName         string
+	autoPort         bool
+	baudRate         int
+	moveRateHz       int
+	moveDeadzone     int
+	moveSmoothing    float64
+	adaptiveMoves    bool
+	reconnectDelay   time.Duration
+	captureKeyboard  bool
 	toggleHotkeyName string
 	toggleHotkeyVK   uint32
-	guiMode         bool
+	guiMode          bool
 }
 
 func parseConfig() (config, error) {
 	port := flag.String("port", "auto", "Serial COM port connected to the ESP32 (or 'auto')")
-	baud := flag.Int("baud", 115200, "Serial baud rate")
-	rate := flag.Int("rate", 60, "Maximum move send rate (events per second)")
+	baud := flag.Int("baud", 230400, "Serial baud rate")
+	rate := flag.Int("rate", 45, "Maximum move send rate (events per second)")
+	deadzone := flag.Int("deadzone", 1, "Ignore tiny move deltas up to this absolute value (0 disables)")
+	smooth := flag.Float64("smooth", 0.2, "Micro-smoothing factor for small movement (0 disables)")
+	adaptive := flag.Bool("adaptive", true, "Adapt move send cadence when serial queue is congested")
 	reconnect := flag.Duration("reconnect", 750*time.Millisecond, "Reconnect delay after serial failure")
 	keyboard := flag.Bool("keyboard", true, "Capture and forward keyboard key down/up events")
 	toggle := flag.String("toggle", defaultToggleHotkeyName, "Hotkey to toggle remote mode (F1-F12)")
@@ -46,15 +52,18 @@ func parseConfig() (config, error) {
 	toggleVK, _ := toggleHotkeyNameToVK(normalizedToggle)
 
 	cfg := config{
-		portName:        *port,
-		autoPort:        autoPort,
-		baudRate:        *baud,
-		moveRateHz:      *rate,
-		reconnectDelay:  *reconnect,
-		captureKeyboard: *keyboard,
+		portName:         *port,
+		autoPort:         autoPort,
+		baudRate:         *baud,
+		moveRateHz:       *rate,
+		moveDeadzone:     *deadzone,
+		moveSmoothing:    *smooth,
+		adaptiveMoves:    *adaptive,
+		reconnectDelay:   *reconnect,
+		captureKeyboard:  *keyboard,
 		toggleHotkeyName: normalizedToggle,
 		toggleHotkeyVK:   toggleVK,
-		guiMode:         *gui,
+		guiMode:          *gui,
 	}
 
 	if cfg.portName == "" && !cfg.autoPort {
@@ -65,6 +74,12 @@ func parseConfig() (config, error) {
 	}
 	if cfg.moveRateHz <= 0 {
 		return cfg, errors.New("rate must be greater than 0")
+	}
+	if cfg.moveDeadzone < 0 {
+		return cfg, errors.New("deadzone cannot be negative")
+	}
+	if cfg.moveSmoothing < 0 || cfg.moveSmoothing >= 1 {
+		return cfg, errors.New("smooth must be in range [0, 1)")
 	}
 	if cfg.reconnectDelay <= 0 {
 		return cfg, errors.New("reconnect delay must be greater than 0")
