@@ -74,6 +74,14 @@ go mod tidy
 go build -o mousebridge.exe .
 ```
 
+### Run (go run)
+
+From `software/`:
+
+```powershell
+go run . -port COM9 -baud 115200 -rate 120
+```
+
 ### Run
 
 ```powershell
@@ -92,11 +100,26 @@ To disable keyboard forwarding:
 .\mousebridge.exe -port auto -keyboard=false
 ```
 
+### Live Reload with Air
+
+From `software/`:
+
+```powershell
+go install github.com/air-verse/air@latest
+air -c .air.toml -- -port COM9 -baud 115200 -rate 120
+```
+
+Use `go run` mode with auto serial port:
+
+```powershell
+air -c .air.toml -- -port auto -baud 115200 -rate 120
+```
+
 Flags:
 
 - `-port`: Serial port or `auto` (default `auto`)
 - `-baud`: Baud rate (default `115200`)
-- `-rate`: Max movement send rate in Hz (default `120`)
+- `-rate`: Max movement send rate in Hz (default `240`)
 - `-reconnect`: Reconnect delay after serial failure (default `750ms`)
 - `-keyboard`: Forward keyboard events (default `true`)
 

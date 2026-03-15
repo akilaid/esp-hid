@@ -1,0 +1,17 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go.exe build ."
+entrypoint = ["go.exe", "run", "."]
+include_ext = ["go"]
+exclude_dir = ["tmp", "vendor"]
+exclude_regex = ["_test\\.go"]
+stop_on_error = true
+delay = 200
+
+[log]
+time = true
+
+[misc]
+clean_on_exit = true
