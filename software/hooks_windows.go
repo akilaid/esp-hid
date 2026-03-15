@@ -45,7 +45,6 @@ const (
 	llkhfInjected = 0x10
 	llmhfInjected = 0x01
 	wheelDelta    = 120
-	vkF9          = 0x78
 
 	smCXScreen        = 0
 	smCYScreen        = 1
@@ -170,9 +169,14 @@ func publishRemoteModeEvent(out chan<- inputEvent, active bool, source string) {
 	})
 }
 
-func runInputHooks(ctx context.Context, captureKeyboard bool, out chan<- inputEvent) error {
+func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uint32, out chan<- inputEvent) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
+	if toggleHotkeyVK == 0 {
+		defaultVK, _ := toggleHotkeyNameToVK(defaultToggleHotkeyName)
+		toggleHotkeyVK = defaultVK
+	}
 
 	remoteModeActive := false
 	edgeArmed := true
@@ -259,7 +263,7 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, out chan<- inputEv
 			isKeyUp := message == wmKeyUp || message == wmSysKeyUp
 			isInjected := (lParam.Flags & llkhfInjected) != 0
 
-			if lParam.VkCode == vkF9 && !isInjected {
+			if lParam.VkCode == toggleHotkeyVK && !isInjected {
 				if isKeyDown {
 					if !hotkeyDown {
 						hotkeyDown = true

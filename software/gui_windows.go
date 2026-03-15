@@ -21,12 +21,11 @@ type guiApp struct {
 
 	mw              *walk.MainWindow
 	portCombo       *walk.ComboBox
-	devsList        *walk.ListBox
+	toggleCombo     *walk.ComboBox
 	keyboardCheck   *walk.CheckBox
 	rateEdit        *walk.LineEdit
 	statusLabel     *walk.Label
 	activePortLabel *walk.Label
-	logView         *walk.TextEdit
 	startButton     *walk.PushButton
 	stopButton      *walk.PushButton
 }
@@ -49,9 +48,15 @@ func runGUI(initial config) error {
 	}
 
 	app.refreshPorts()
-	app.refreshDevices()
+	if app.toggleCombo != nil {
+		toggleName := app.baseCfg.toggleHotkeyName
+		if normalized, ok := normalizeToggleHotkeyName(toggleName); ok {
+			app.toggleCombo.SetText(normalized)
+		} else {
+			app.toggleCombo.SetText(defaultToggleHotkeyName)
+		}
+	}
 	app.setRunning(false)
-	app.appendLog("GUI ready")
 
 	go app.consumeEvents()
 	go app.backgroundRefresh()
@@ -67,7 +72,8 @@ func (app *guiApp) buildWindow() error {
 	return MainWindow{
 		AssignTo: &app.mw,
 		Title:    "ESP HID Bridge",
-		MinSize:  Size{Width: 840, Height: 560},
+		MinSize:  Size{Width: 520, Height: 140},
+		Size:     Size{Width: 560, Height: 160},
 		Layout:   VBox{},
 		Children: []Widget{
 			Composite{
@@ -86,20 +92,9 @@ func (app *guiApp) buildWindow() error {
 						Text: "Refresh Devices",
 						OnClicked: func() {
 							app.refreshPorts()
-							app.refreshDevices()
 						},
 					},
-					CheckBox{
-						AssignTo: &app.keyboardCheck,
-						Text:     "Forward keyboard",
-						Checked:  app.baseCfg.captureKeyboard,
-					},
-					Label{Text: "Rate:"},
-					LineEdit{
-						AssignTo: &app.rateEdit,
-						Text:     strconv.Itoa(app.baseCfg.moveRateHz),
-						MaxSize:  Size{Width: 80},
-					},
+					HSpacer{},
 					PushButton{
 						AssignTo:  &app.startButton,
 						Text:      "Start",
@@ -115,37 +110,36 @@ func (app *guiApp) buildWindow() error {
 			Composite{
 				Layout: HBox{},
 				Children: []Widget{
+					Label{Text: "Toggle:"},
+					ComboBox{
+						AssignTo:     &app.toggleCombo,
+						Model:        toggleHotkeyChoices,
+						Editable:     false,
+						CurrentIndex: 8,
+						MinSize:      Size{Width: 68},
+						MaxSize:      Size{Width: 68},
+					},
+					CheckBox{
+						AssignTo: &app.keyboardCheck,
+						Text:     "Forward keyboard",
+						Checked:  app.baseCfg.captureKeyboard,
+					},
+					Label{Text: "Rate:"},
+					LineEdit{
+						AssignTo: &app.rateEdit,
+						Text:     strconv.Itoa(app.baseCfg.moveRateHz),
+						MaxSize:  Size{Width: 80},
+					},
+					HSpacer{},
 					Label{Text: "Bridge:"},
 					Label{
 						AssignTo: &app.statusLabel,
 						Text:     "Stopped",
 					},
-					HSpacer{},
 					Label{Text: "Connected Port:"},
 					Label{
 						AssignTo: &app.activePortLabel,
 						Text:     "-",
-					},
-				},
-			},
-			GroupBox{
-				Title:  "Detected Serial Devices",
-				Layout: VBox{},
-				Children: []Widget{
-					ListBox{
-						AssignTo: &app.devsList,
-						Model:    []string{"No serial devices detected"},
-					},
-				},
-			},
-			GroupBox{
-				Title:  "Activity",
-				Layout: VBox{},
-				Children: []Widget{
-					TextEdit{
-						AssignTo: &app.logView,
-						ReadOnly: true,
-						VScroll:  true,
 					},
 				},
 			},
@@ -172,7 +166,6 @@ func (app *guiApp) onStart() {
 
 	app.setRunning(true)
 	app.statusLabel.SetText("Starting")
-	app.appendLog(fmt.Sprintf("Starting bridge: port=%s rate=%d keyboard=%t", cfg.portName, cfg.moveRateHz, cfg.captureKeyboard))
 }
 
 func (app *guiApp) onStop() {
@@ -235,15 +228,6 @@ func (app *guiApp) applyEvent(event bridgeEvent) {
 	case bridgeEventCaptureError:
 		app.statusLabel.SetText("Capture error")
 	}
-
-	line := event.Message
-	if line == "" {
-		line = string(event.Type)
-	}
-	if event.Port != "" {
-		line = fmt.Sprintf("%s (%s)", line, event.Port)
-	}
-	app.appendLog(line)
 }
 
 func (app *guiApp) refreshPorts() {
@@ -275,25 +259,6 @@ func (app *guiApp) refreshPorts() {
 	app.portCombo.SetText(items[0])
 }
 
-func (app *guiApp) refreshDevices() {
-	if app.devsList == nil {
-		return
-	}
-
-	ports, err := listSerialPorts()
-	if err != nil {
-		_ = app.devsList.SetModel([]string{"Failed to read serial devices: " + err.Error()})
-		return
-	}
-
-	if len(ports) == 0 {
-		_ = app.devsList.SetModel([]string{"No serial devices detected"})
-		return
-	}
-
-	_ = app.devsList.SetModel(ports)
-}
-
 func (app *guiApp) backgroundRefresh() {
 	ticker := time.NewTicker(4 * time.Second)
 	defer ticker.Stop()
@@ -311,7 +276,6 @@ func (app *guiApp) backgroundRefresh() {
 				if app.runtime == nil || !app.runtime.Running() {
 					app.refreshPorts()
 				}
-				app.refreshDevices()
 			})
 		}
 	}
@@ -321,6 +285,14 @@ func (app *guiApp) readConfigFromForm() (config, error) {
 	cfg := app.baseCfg
 	cfg.guiMode = true
 	cfg.captureKeyboard = app.keyboardCheck.Checked()
+
+	toggleName, ok := normalizeToggleHotkeyName(app.toggleCombo.Text())
+	if !ok {
+		return cfg, fmt.Errorf("invalid toggle hotkey: %q", app.toggleCombo.Text())
+	}
+	toggleVK, _ := toggleHotkeyNameToVK(toggleName)
+	cfg.toggleHotkeyName = toggleName
+	cfg.toggleHotkeyVK = toggleVK
 
 	port := strings.TrimSpace(app.portCombo.Text())
 	if port == "" || strings.EqualFold(port, "auto") {
@@ -351,30 +323,13 @@ func (app *guiApp) setRunning(running bool) {
 	if app.portCombo != nil {
 		app.portCombo.SetEnabled(!running)
 	}
+	if app.toggleCombo != nil {
+		app.toggleCombo.SetEnabled(!running)
+	}
 	if app.keyboardCheck != nil {
 		app.keyboardCheck.SetEnabled(!running)
 	}
 	if app.rateEdit != nil {
 		app.rateEdit.SetEnabled(!running)
 	}
-}
-
-func (app *guiApp) appendLog(message string) {
-	if app.logView == nil {
-		return
-	}
-
-	line := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), message)
-	existing := app.logView.Text()
-
-	if len(existing) > 64000 {
-		existing = existing[len(existing)-32000:]
-	}
-
-	if existing == "" {
-		app.logView.SetText(line)
-		return
-	}
-
-	app.logView.SetText(existing + "\r\n" + line)
 }

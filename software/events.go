@@ -147,7 +147,7 @@ func runCaptureLoop(ctx context.Context, cfg config, queue chan string) error {
 	errorChannel := make(chan error, 1)
 
 	go func() {
-		errorChannel <- runInputHooks(ctx, cfg.captureKeyboard, eventChannel)
+		errorChannel <- runInputHooks(ctx, cfg.captureKeyboard, cfg.toggleHotkeyVK, eventChannel)
 		close(eventChannel)
 		close(errorChannel)
 	}()

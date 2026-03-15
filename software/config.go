@@ -22,6 +22,8 @@ type config struct {
 	moveRateHz      int
 	reconnectDelay  time.Duration
 	captureKeyboard bool
+	toggleHotkeyName string
+	toggleHotkeyVK   uint32
 	guiMode         bool
 }
 
@@ -31,10 +33,17 @@ func parseConfig() (config, error) {
 	rate := flag.Int("rate", 60, "Maximum move send rate (events per second)")
 	reconnect := flag.Duration("reconnect", 750*time.Millisecond, "Reconnect delay after serial failure")
 	keyboard := flag.Bool("keyboard", true, "Capture and forward keyboard key down/up events")
+	toggle := flag.String("toggle", defaultToggleHotkeyName, "Hotkey to toggle remote mode (F1-F12)")
 	gui := flag.Bool("gui", true, "Run with native Windows GUI")
 	flag.Parse()
 
 	autoPort := strings.EqualFold(*port, "auto")
+
+	normalizedToggle, ok := normalizeToggleHotkeyName(*toggle)
+	if !ok {
+		return config{}, fmt.Errorf("invalid toggle hotkey %q (supported: F1-F12)", *toggle)
+	}
+	toggleVK, _ := toggleHotkeyNameToVK(normalizedToggle)
 
 	cfg := config{
 		portName:        *port,
@@ -43,6 +52,8 @@ func parseConfig() (config, error) {
 		moveRateHz:      *rate,
 		reconnectDelay:  *reconnect,
 		captureKeyboard: *keyboard,
+		toggleHotkeyName: normalizedToggle,
+		toggleHotkeyVK:   toggleVK,
 		guiMode:         *gui,
 	}
 
