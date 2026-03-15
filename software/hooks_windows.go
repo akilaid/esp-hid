@@ -24,7 +24,12 @@ var (
 	procPostThreadMessageW  = user32.NewProc("PostThreadMessageW")
 	procEnumDisplayMonitors = user32.NewProc("EnumDisplayMonitors")
 	procGetCursorPos        = user32.NewProc("GetCursorPos")
+	procGetCursorInfo       = user32.NewProc("GetCursorInfo")
 	procGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
+	procShowCursor          = user32.NewProc("ShowCursor")
+	procCreateCursor        = user32.NewProc("CreateCursor")
+	procSetSystemCursor     = user32.NewProc("SetSystemCursor")
+	procSystemParametersW   = user32.NewProc("SystemParametersInfoW")
 	procSetCursorPos        = user32.NewProc("SetCursorPos")
 )
 
@@ -55,9 +60,42 @@ const (
 	smCXVirtualScreen = 78
 	smCYVirtualScreen = 79
 
+	cursorShowing = 0x00000001
+	spiSetCursors = 0x0057
+
+	ocrNormal      = 32512
+	ocrIBeam       = 32513
+	ocrWait        = 32514
+	ocrCross       = 32515
+	ocrUp          = 32516
+	ocrSizeNWSE    = 32642
+	ocrSizeNESW    = 32643
+	ocrSizeWE      = 32644
+	ocrSizeNS      = 32645
+	ocrSizeAll     = 32646
+	ocrNo          = 32648
+	ocrHand        = 32649
+	ocrAppStarting = 32650
+
 	rightEdgeActivationThreshold = 1
 	leftwardReturnThreshold      = 280
 )
+
+var hideSystemCursorIDs = [...]uintptr{
+	ocrNormal,
+	ocrIBeam,
+	ocrWait,
+	ocrCross,
+	ocrUp,
+	ocrSizeNWSE,
+	ocrSizeNESW,
+	ocrSizeWE,
+	ocrSizeNS,
+	ocrSizeAll,
+	ocrNo,
+	ocrHand,
+	ocrAppStarting,
+}
 
 type point struct {
 	X int32
@@ -88,6 +126,13 @@ type kbdllHookStruct struct {
 	Flags       uint32
 	Time        uint32
 	DwExtraInfo uintptr
+}
+
+type cursorInfo struct {
+	CbSize      uint32
+	Flags       uint32
+	HCursor     uintptr
+	PtScreenPos point
 }
 
 type monitorRect struct {
@@ -271,6 +316,86 @@ func setCursorPosition(x int32, y int32) {
 	procSetCursorPos.Call(uintptr(int(x)), uintptr(int(y)))
 }
 
+func currentCursorVisible() (bool, bool) {
+	info := cursorInfo{CbSize: uint32(unsafe.Sizeof(cursorInfo{}))}
+	fetched, _, _ := procGetCursorInfo.Call(uintptr(unsafe.Pointer(&info)))
+	if fetched == 0 {
+		return false, false
+	}
+
+	return (info.Flags & cursorShowing) != 0, true
+}
+
+func setCursorVisible(visible bool) {
+	const maxAttempts = 16
+
+	showValue := uintptr(0)
+	if visible {
+		showValue = 1
+	}
+
+	currentVisible, ok := currentCursorVisible()
+	if ok && currentVisible == visible {
+		return
+	}
+
+	for i := 0; i < maxAttempts; i++ {
+		procShowCursor.Call(showValue)
+		currentVisible, ok = currentCursorVisible()
+		if !ok || currentVisible == visible {
+			return
+		}
+	}
+}
+
+func createTransparentCursor() (uintptr, error) {
+	const cursorSize = 32
+
+	var andMask [cursorSize * cursorSize / 8]byte
+	var xorMask [cursorSize * cursorSize / 8]byte
+	for i := range andMask {
+		andMask[i] = 0xFF
+	}
+
+	cursorHandle, _, createErr := procCreateCursor.Call(
+		0,
+		0,
+		0,
+		cursorSize,
+		cursorSize,
+		uintptr(unsafe.Pointer(&andMask[0])),
+		uintptr(unsafe.Pointer(&xorMask[0])),
+	)
+	if cursorHandle == 0 {
+		if createErr != syscall.Errno(0) {
+			return 0, createErr
+		}
+		return 0, errors.New("CreateCursor failed")
+	}
+
+	return cursorHandle, nil
+}
+
+func hideSystemCursors() bool {
+	for _, cursorID := range hideSystemCursorIDs {
+		cursorHandle, err := createTransparentCursor()
+		if err != nil {
+			return false
+		}
+
+		updated, _, _ := procSetSystemCursor.Call(cursorHandle, cursorID)
+		if updated == 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
+func restoreSystemCursors() {
+	procSystemParametersW.Call(spiSetCursors, 0, 0, 0)
+}
+
 func publishRemoteModeEvent(out chan<- inputEvent, active bool, source string) {
 	publishInputEvent(out, inputEvent{
 		kind:   inputRemoteModeChangedEvent,
@@ -289,10 +414,39 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 	}
 
 	remoteModeActive := false
+	systemCursorHidden := false
 	edgeArmed := true
 	hotkeyDown := false
 	leftwardReturnDistance := 0
 	remoteAnchor := virtualCenterPoint()
+	defer func() {
+		if systemCursorHidden {
+			restoreSystemCursors()
+		}
+		if remoteModeActive {
+			setCursorVisible(true)
+		}
+	}()
+	setRemoteModeActive := func(active bool, source string) {
+		if remoteModeActive == active {
+			return
+		}
+
+		remoteModeActive = active
+		if active {
+			setCursorVisible(false)
+			if visible, ok := currentCursorVisible(); (!ok || visible) && !systemCursorHidden {
+				systemCursorHidden = hideSystemCursors()
+			}
+		} else {
+			if systemCursorHidden {
+				restoreSystemCursors()
+				systemCursorHidden = false
+			}
+			setCursorVisible(true)
+		}
+		publishRemoteModeEvent(out, active, source)
+	}
 	monitorRects, _ := enumerateMonitorRects()
 	refreshMonitorRects := func() {
 		updatedMonitorRects, err := enumerateMonitorRects()
@@ -383,10 +537,11 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 			return
 		}
 
-		remoteModeActive = false
+		returnPoint := returnToHostPointForAnchor(remoteAnchor.Y)
+		setCursorPosition(returnPoint.X, returnPoint.Y)
+		setRemoteModeActive(false, "serial")
 		edgeArmed = true
 		resetLeftwardReturnDistance()
-		publishRemoteModeEvent(out, false, "serial")
 	}
 
 	mouseCallback := windows.NewCallback(func(nCode uintptr, wParam uintptr, lParam *msllHookStruct) uintptr {
@@ -409,11 +564,10 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 					resetLeftwardReturnDistance()
 				} else if canActivateFromRightEdge(lParam.Pt) {
 					if edgeArmed {
-						remoteModeActive = true
+						setRemoteModeActive(true, "edge")
 						edgeArmed = false
 						resetLeftwardReturnDistance()
 						setRemoteAnchorForPoint(lParam.Pt)
-						publishRemoteModeEvent(out, true, "edge")
 						setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
 						return 1
 					}
@@ -423,6 +577,13 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 			}
 
 			if remoteModeActive {
+				if !systemCursorHidden {
+					setCursorVisible(false)
+					if visible, ok := currentCursorVisible(); ok && visible {
+						systemCursorHidden = hideSystemCursors()
+					}
+				}
+
 				if (lParam.Flags & llmhfInjected) != 0 {
 					return 1
 				}
@@ -433,13 +594,11 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 					dy := int(lParam.Pt.Y - remoteAnchor.Y)
 					updateLeftwardReturnDistance(dx, dy)
 					if leftwardReturnDistance >= leftwardReturnThreshold {
-						remoteModeActive = false
-						edgeArmed = false
-						resetLeftwardReturnDistance()
-						publishRemoteModeEvent(out, false, "edge_return")
-
 						returnPoint := returnToHostPointForAnchor(lParam.Pt.Y)
 						setCursorPosition(returnPoint.X, returnPoint.Y)
+						setRemoteModeActive(false, "edge_return")
+						edgeArmed = false
+						resetLeftwardReturnDistance()
 						return 1
 					}
 					if dx != 0 || dy != 0 {
@@ -495,16 +654,20 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 					if !hotkeyDown {
 						hotkeyDown = true
 						if consumeHotkey {
-							remoteModeActive = !remoteModeActive
-							edgeArmed = false
-							resetLeftwardReturnDistance()
-							publishRemoteModeEvent(out, remoteModeActive, "hotkey")
-							if remoteModeActive {
+							nextRemoteModeState := !remoteModeActive
+							if nextRemoteModeState {
 								if cursorPoint, ok := currentCursorPoint(); ok {
 									setRemoteAnchorForPoint(cursorPoint)
 								}
+								setRemoteModeActive(true, "hotkey")
 								setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
+							} else {
+								returnPoint := returnToHostPointForAnchor(remoteAnchor.Y)
+								setCursorPosition(returnPoint.X, returnPoint.Y)
+								setRemoteModeActive(false, "hotkey")
 							}
+							edgeArmed = false
+							resetLeftwardReturnDistance()
 						}
 					}
 				} else if isKeyUp {
