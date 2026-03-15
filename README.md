@@ -54,6 +54,18 @@ Default firmware values:
 - BLE device name: `PC Bridge Combo`.
 - BLE manufacturer: `ESP HID Bridge`.
 
+### Build/Flash With Arduino CLI
+
+From `firmware/`:
+
+```powershell
+# Build firmware into firmware\out\
+arduino-cli compile --fqbn esp32:esp32:esp32 --libraries libraries --output-dir out .
+
+# Flash previously built firmware (replace COM9 with your ESP32 port)
+arduino-cli upload -p COM9 -b esp32:esp32:esp32 --input-dir out -t
+```
+
 ## Software Setup (Windows)
 
 From `software/`:
