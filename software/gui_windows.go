@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -799,6 +800,10 @@ func (app *guiApp) startBridge(showErrorDialog bool) error {
 
 	if app.runtime != nil && app.runtime.Running() {
 		return nil
+	}
+
+	if err := saveSettingsConfig(cfg); err != nil {
+		log.Printf("settings save failed: %v", err)
 	}
 
 	app.runtime = newBridgeRuntime(cfg, app.pushEvent)

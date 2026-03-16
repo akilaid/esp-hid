@@ -150,20 +150,80 @@ func normalizeHostSide(value string) (string, bool) {
 	}
 }
 
+func defaultConfig() config {
+	toggleVK, _ := toggleHotkeyNameToVK(defaultToggleHotkeyName)
+
+	return config{
+		portName:         "auto",
+		autoPort:         true,
+		baudRate:         460800,
+		moveRateHz:       45,
+		moveDeadzone:     1,
+		moveSmoothing:    0.2,
+		adaptiveMoves:    true,
+		leftwardReturn:   false,
+		slaveWidth:       defaultSlaveWidth,
+		slaveHeight:      defaultSlaveHeight,
+		hostSide:         defaultHostSide,
+		reconnectDelay:   750 * time.Millisecond,
+		captureKeyboard:  true,
+		toggleHotkeyName: defaultToggleHotkeyName,
+		toggleHotkeyVK:   toggleVK,
+		guiMode:          true,
+	}
+}
+
 func parseConfig() (config, error) {
-	port := flag.String("port", "auto", "Serial COM port connected to the ESP32 (or 'auto')")
-	baud := flag.Int("baud", 230400, "Serial baud rate")
-	rate := flag.Int("rate", 45, "Maximum move send rate (events per second)")
-	deadzone := flag.Int("deadzone", 1, "Ignore tiny move deltas up to this absolute value (0 disables)")
-	smooth := flag.Float64("smooth", 0.2, "Micro-smoothing factor for small movement (0 disables)")
-	adaptive := flag.Bool("adaptive", true, "Adapt move send cadence when serial queue is congested")
-	leftReturn := flag.Bool("leftreturn", false, "Allow returning to host via a deliberate left-swipe gesture while in remote mode")
-	slaveResolution := flag.String("slave-res", defaultSlaveResolution, "Virtual slave screen resolution WIDTHxHEIGHT used for edge-aware return detection")
-	hostSide := flag.String("host-side", defaultHostSide, "Host placement relative to slave: left|right|top|bottom")
-	reconnect := flag.Duration("reconnect", 750*time.Millisecond, "Reconnect delay after serial failure")
-	keyboard := flag.Bool("keyboard", true, "Capture and forward keyboard key down/up events")
-	toggle := flag.String("toggle", defaultToggleHotkeyName, "Hotkey to toggle remote mode (F1-F12)")
-	gui := flag.Bool("gui", true, "Run with native Windows GUI")
+	defaultCfg := defaultConfig()
+	loadedCfg, loadErr := loadSettingsConfig(defaultCfg)
+	if loadErr != nil {
+		log.Printf("settings load failed, using built-in defaults: %v", loadErr)
+	} else {
+		defaultCfg = loadedCfg
+	}
+
+	defaultPort := defaultCfg.portName
+	if defaultPort == "" || defaultCfg.autoPort {
+		defaultPort = "auto"
+	}
+
+	defaultReconnectDelay := defaultCfg.reconnectDelay
+	if defaultReconnectDelay <= 0 {
+		defaultReconnectDelay = 750 * time.Millisecond
+	}
+
+	defaultToggle := defaultCfg.toggleHotkeyName
+	if normalizedToggle, ok := normalizeToggleHotkeyName(defaultToggle); ok {
+		defaultToggle = normalizedToggle
+	} else {
+		defaultToggle = defaultToggleHotkeyName
+	}
+
+	defaultHostSideValue := defaultCfg.hostSide
+	if normalizedHostSide, ok := normalizeHostSide(defaultHostSideValue); ok {
+		defaultHostSideValue = normalizedHostSide
+	} else {
+		defaultHostSideValue = defaultHostSide
+	}
+
+	defaultSlaveResolutionValue := formatSlaveResolution(defaultCfg.slaveWidth, defaultCfg.slaveHeight)
+	if _, _, ok := parseSlaveResolution(defaultSlaveResolutionValue); !ok {
+		defaultSlaveResolutionValue = defaultSlaveResolution
+	}
+
+	port := flag.String("port", defaultPort, "Serial COM port connected to the ESP32 (or 'auto')")
+	baud := flag.Int("baud", defaultCfg.baudRate, "Serial baud rate")
+	rate := flag.Int("rate", defaultCfg.moveRateHz, "Maximum move send rate (events per second)")
+	deadzone := flag.Int("deadzone", defaultCfg.moveDeadzone, "Ignore tiny move deltas up to this absolute value (0 disables)")
+	smooth := flag.Float64("smooth", defaultCfg.moveSmoothing, "Micro-smoothing factor for small movement (0 disables)")
+	adaptive := flag.Bool("adaptive", defaultCfg.adaptiveMoves, "Adapt move send cadence when serial queue is congested")
+	leftReturn := flag.Bool("leftreturn", defaultCfg.leftwardReturn, "Allow returning to host via a deliberate left-swipe gesture while in remote mode")
+	slaveResolution := flag.String("slave-res", defaultSlaveResolutionValue, "Virtual slave screen resolution WIDTHxHEIGHT used for edge-aware return detection")
+	hostSide := flag.String("host-side", defaultHostSideValue, "Host placement relative to slave: left|right|top|bottom")
+	reconnect := flag.Duration("reconnect", defaultReconnectDelay, "Reconnect delay after serial failure")
+	keyboard := flag.Bool("keyboard", defaultCfg.captureKeyboard, "Capture and forward keyboard key down/up events")
+	toggle := flag.String("toggle", defaultToggle, "Hotkey to toggle remote mode (F1-F12)")
+	gui := flag.Bool("gui", defaultCfg.guiMode, "Run with native Windows GUI")
 	flag.Parse()
 
 	autoPort := strings.EqualFold(*port, "auto")
