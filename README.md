@@ -120,6 +120,11 @@ Bridge status in GUI:
 - Toggle hotkey only works when serial connection is healthy.
 - If serial drops while remote mode is active, remote mode is disabled and release commands are sent.
 
+## Firmware LED Indicator
+
+- No BLE client connected: ESP32 built-in LED stays on continuously.
+- BLE client connected: ESP32 built-in LED blinks for 200ms every 20 seconds.
+
 ## Command-Line Flags
 
 All flags apply to both GUI and CLI modes:
