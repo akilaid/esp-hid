@@ -112,9 +112,11 @@ Bridge status in GUI:
 ## Remote Mode Behavior
 
 - Remote mode can be activated by:
-	- moving cursor to the right screen edge, or
+	- moving cursor to the host-side boundary (right edge when `-host-side=left`, left edge when `-host-side=right`, etc.), or
 	- pressing toggle hotkey (default `F9`, configurable `F1`-`F12`).
-- While remote mode is active, sustained leftward movement automatically returns control to the host and places the host cursor near the activating screen edge.
+- Host return always works via the toggle hotkey.
+- Edge-aware return can be configured with slave resolution and host-side placement settings (GUI dropdowns or CLI flags). With these set, return to host happens only when you push against the configured host-side edge of the virtual slave surface.
+- Optional left-swipe return can also be enabled (`-leftreturn=true`) as a fallback gesture.
 - Toggle hotkey only works when serial connection is healthy.
 - If serial drops while remote mode is active, remote mode is disabled and release commands are sent.
 
@@ -128,6 +130,10 @@ All flags apply to both GUI and CLI modes:
 - `-deadzone`: ignore tiny move deltas up to this absolute value (default `1`, `0` disables).
 - `-smooth`: micro-smoothing factor for small movement (default `0.2`, range `[0, 1)`, `0` disables).
 - `-adaptive`: adapt move send cadence when serial queue is congested (default `true`).
+- `-slave-res`: virtual slave resolution `WIDTHxHEIGHT` for edge-aware return (default `1920x1080`).
+	- GUI includes common laptop and mobile/tablet presets and also accepts custom `WIDTHxHEIGHT` values.
+- `-host-side`: host placement relative to slave (`left|right|top|bottom`, default `left`).
+- `-leftreturn`: allow host return by deliberate quick left-swipe in remote mode (default `false`).
 - `-reconnect`: reconnect delay after serial failure (default `750ms`).
 - `-keyboard`: forward keyboard events (default `true`).
 - `-toggle`: remote mode hotkey (`F1`-`F12`, default `F9`).

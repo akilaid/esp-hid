@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -77,8 +78,13 @@ const (
 	ocrHand        = 32649
 	ocrAppStarting = 32650
 
-	rightEdgeActivationThreshold = 1
-	leftwardReturnThreshold      = 280
+	hostEdgeActivationThreshold = 1
+	edgeReturnPressureThreshold = 48
+	edgeEntryInsetMin           = 24
+	edgeEntryInsetMax           = 160
+	leftwardReturnMinStep       = 6
+	leftwardReturnThreshold     = 900
+	leftwardReturnWindow        = 450 * time.Millisecond
 )
 
 var hideSystemCursorIDs = [...]uintptr{
@@ -203,25 +209,62 @@ func pointInsideAnyMonitor(p point, monitorRects []monitorRect) bool {
 	return found
 }
 
-func isOuterRightEdgePoint(p point, monitorRect monitorRect, monitorRects []monitorRect) bool {
+func clampInt32(value int32, minValue int32, maxValue int32) int32 {
+	if maxValue < minValue {
+		return minValue
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func isOuterActivationEdgePoint(p point, monitorRect monitorRect, monitorRects []monitorRect, hostSide string) bool {
 	if !monitorRect.containsPoint(p) {
 		return false
 	}
 
-	activationX := monitorRect.Right - 1 - rightEdgeActivationThreshold
-	if p.X < activationX {
-		return false
-	}
+	switch hostSide {
+	case hostSideRight:
+		activationX := monitorRect.Left + hostEdgeActivationThreshold
+		if p.X > activationX {
+			return false
+		}
 
-	sampleY := p.Y
-	if sampleY < monitorRect.Top {
-		sampleY = monitorRect.Top
-	} else if sampleY >= monitorRect.Bottom {
-		sampleY = monitorRect.Bottom - 1
-	}
+		sampleY := clampInt32(p.Y, monitorRect.Top, monitorRect.Bottom-1)
+		samplePoint := point{X: monitorRect.Left - 1, Y: sampleY}
+		return !pointInsideAnyMonitor(samplePoint, monitorRects)
+	case hostSideTop:
+		activationY := monitorRect.Top + hostEdgeActivationThreshold
+		if p.Y > activationY {
+			return false
+		}
 
-	samplePoint := point{X: monitorRect.Right, Y: sampleY}
-	return !pointInsideAnyMonitor(samplePoint, monitorRects)
+		sampleX := clampInt32(p.X, monitorRect.Left, monitorRect.Right-1)
+		samplePoint := point{X: sampleX, Y: monitorRect.Top - 1}
+		return !pointInsideAnyMonitor(samplePoint, monitorRects)
+	case hostSideBottom:
+		activationY := monitorRect.Bottom - 1 - hostEdgeActivationThreshold
+		if p.Y < activationY {
+			return false
+		}
+
+		sampleX := clampInt32(p.X, monitorRect.Left, monitorRect.Right-1)
+		samplePoint := point{X: sampleX, Y: monitorRect.Bottom}
+		return !pointInsideAnyMonitor(samplePoint, monitorRects)
+	default:
+		activationX := monitorRect.Right - 1 - hostEdgeActivationThreshold
+		if p.X < activationX {
+			return false
+		}
+
+		sampleY := clampInt32(p.Y, monitorRect.Top, monitorRect.Bottom-1)
+		samplePoint := point{X: monitorRect.Right, Y: sampleY}
+		return !pointInsideAnyMonitor(samplePoint, monitorRects)
+	}
 }
 
 func currentCursorPoint() (point, bool) {
@@ -404,7 +447,17 @@ func publishRemoteModeEvent(out chan<- inputEvent, active bool, source string) {
 	})
 }
 
-func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uint32, out chan<- inputEvent, remoteActivationAllowed func() bool) error {
+func runInputHooks(
+	ctx context.Context,
+	captureKeyboard bool,
+	toggleHotkeyVK uint32,
+	leftwardReturnEnabled bool,
+	slaveWidth int,
+	slaveHeight int,
+	hostSide string,
+	out chan<- inputEvent,
+	remoteActivationAllowed func() bool,
+) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -412,12 +465,27 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 		defaultVK, _ := toggleHotkeyNameToVK(defaultToggleHotkeyName)
 		toggleHotkeyVK = defaultVK
 	}
+	if slaveWidth <= 0 {
+		slaveWidth = defaultSlaveWidth
+	}
+	if slaveHeight <= 0 {
+		slaveHeight = defaultSlaveHeight
+	}
+	if normalizedHostSide, ok := normalizeHostSide(hostSide); ok {
+		hostSide = normalizedHostSide
+	} else {
+		hostSide = defaultHostSide
+	}
 
 	remoteModeActive := false
 	systemCursorHidden := false
 	edgeArmed := true
 	hotkeyDown := false
 	leftwardReturnDistance := 0
+	leftwardReturnWindowStart := time.Time{}
+	edgeReturnPressure := 0
+	virtualSlaveX := slaveWidth / 2
+	virtualSlaveY := slaveHeight / 2
 	remoteAnchor := virtualCenterPoint()
 	defer func() {
 		if systemCursorHidden {
@@ -464,53 +532,261 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 		refreshMonitorRects()
 		return findMonitorForPoint(p, monitorRects)
 	}
-	canActivateFromRightEdge := func(p point) bool {
+	canActivateFromHostEdge := func(p point) bool {
 		monitorRect, found := findMonitor(p)
 		if !found {
-			rightEdgeX := virtualRightEdgeX()
-			return p.X >= rightEdgeX-rightEdgeActivationThreshold
+			virtualLeft := getSystemMetric(smXVirtualScreen)
+			virtualTop := getSystemMetric(smYVirtualScreen)
+			virtualWidth := getSystemMetric(smCXVirtualScreen)
+			virtualHeight := getSystemMetric(smCYVirtualScreen)
+			if virtualWidth <= 0 {
+				virtualLeft = 0
+				virtualWidth = getSystemMetric(smCXScreen)
+			}
+			if virtualHeight <= 0 {
+				virtualTop = 0
+				virtualHeight = getSystemMetric(smCYScreen)
+			}
+			if virtualWidth <= 0 {
+				virtualWidth = 1
+			}
+			if virtualHeight <= 0 {
+				virtualHeight = 1
+			}
+
+			virtualRight := virtualLeft + virtualWidth - 1
+			virtualBottom := virtualTop + virtualHeight - 1
+
+			switch hostSide {
+			case hostSideRight:
+				return p.X <= virtualLeft+hostEdgeActivationThreshold
+			case hostSideTop:
+				return p.Y <= virtualTop+hostEdgeActivationThreshold
+			case hostSideBottom:
+				return p.Y >= virtualBottom-hostEdgeActivationThreshold
+			default:
+				return p.X >= virtualRight-hostEdgeActivationThreshold
+			}
 		}
 
-		return isOuterRightEdgePoint(p, monitorRect, monitorRects)
+		return isOuterActivationEdgePoint(p, monitorRect, monitorRects, hostSide)
+	}
+	entryInsetForAxis := func(axisLength int) int {
+		inset := axisLength / 12
+		if inset < edgeEntryInsetMin {
+			inset = edgeEntryInsetMin
+		}
+		if inset > edgeEntryInsetMax {
+			inset = edgeEntryInsetMax
+		}
+		if inset >= axisLength {
+			inset = axisLength / 2
+		}
+		if inset < 0 {
+			inset = 0
+		}
+		return inset
+	}
+	setVirtualSlaveCursorForActivation := func(source string) {
+		entryX := slaveWidth / 2
+		entryY := slaveHeight / 2
+
+		if source == "edge" {
+			insetX := entryInsetForAxis(slaveWidth)
+			insetY := entryInsetForAxis(slaveHeight)
+
+			switch hostSide {
+			case hostSideLeft:
+				entryX = insetX
+			case hostSideRight:
+				entryX = slaveWidth - 1 - insetX
+			case hostSideTop:
+				entryY = insetY
+			case hostSideBottom:
+				entryY = slaveHeight - 1 - insetY
+			}
+		}
+
+		if entryX < 0 {
+			entryX = 0
+		} else if entryX >= slaveWidth {
+			entryX = slaveWidth - 1
+		}
+
+		if entryY < 0 {
+			entryY = 0
+		} else if entryY >= slaveHeight {
+			entryY = slaveHeight - 1
+		}
+
+		virtualSlaveX = entryX
+		virtualSlaveY = entryY
+		edgeReturnPressure = 0
+	}
+	resetEdgeReturnPressure := func() {
+		edgeReturnPressure = 0
+	}
+	updateVirtualSlaveCursorAndCheckReturn := func(dx int, dy int) bool {
+		nextX := virtualSlaveX + dx
+		nextY := virtualSlaveY + dy
+		overflow := 0
+
+		switch hostSide {
+		case hostSideLeft:
+			if nextX < 0 && dx < 0 {
+				overflow = -nextX
+			}
+		case hostSideRight:
+			if nextX >= slaveWidth && dx > 0 {
+				overflow = nextX - (slaveWidth - 1)
+			}
+		case hostSideTop:
+			if nextY < 0 && dy < 0 {
+				overflow = -nextY
+			}
+		case hostSideBottom:
+			if nextY >= slaveHeight && dy > 0 {
+				overflow = nextY - (slaveHeight - 1)
+			}
+		}
+
+		if overflow > 0 {
+			edgeReturnPressure += overflow
+		} else {
+			decay := absInt(dx) + absInt(dy)
+			if decay < 1 {
+				decay = 1
+			}
+			edgeReturnPressure -= decay * 2
+			if edgeReturnPressure < 0 {
+				edgeReturnPressure = 0
+			}
+		}
+
+		if nextX < 0 {
+			nextX = 0
+		} else if nextX >= slaveWidth {
+			nextX = slaveWidth - 1
+		}
+
+		if nextY < 0 {
+			nextY = 0
+		} else if nextY >= slaveHeight {
+			nextY = slaveHeight - 1
+		}
+
+		virtualSlaveX = nextX
+		virtualSlaveY = nextY
+
+		return edgeReturnPressure >= edgeReturnPressureThreshold
 	}
 	resetLeftwardReturnDistance := func() {
 		leftwardReturnDistance = 0
+		leftwardReturnWindowStart = time.Time{}
 	}
-	updateLeftwardReturnDistance := func(dx int, dy int) {
+	updateLeftwardReturnDistance := func(dx int, dy int) bool {
+		if !leftwardReturnEnabled || hostSide != hostSideLeft {
+			return false
+		}
+
 		if dx >= 0 {
 			leftwardReturnDistance = 0
-			return
+			leftwardReturnWindowStart = time.Time{}
+			return false
+		}
+
+		if absInt(dx) < leftwardReturnMinStep {
+			return false
 		}
 
 		if absInt(dy) > absInt(dx)*2 {
 			leftwardReturnDistance = 0
-			return
+			leftwardReturnWindowStart = time.Time{}
+			return false
+		}
+
+		now := time.Now()
+		if leftwardReturnDistance == 0 || leftwardReturnWindowStart.IsZero() {
+			leftwardReturnWindowStart = now
+		} else if now.Sub(leftwardReturnWindowStart) > leftwardReturnWindow {
+			leftwardReturnDistance = 0
+			leftwardReturnWindowStart = now
 		}
 
 		leftwardReturnDistance += -dx
 		if leftwardReturnDistance < 0 {
 			leftwardReturnDistance = 0
 		}
-	}
-	returnToHostPointForAnchor := func(currentY int32) point {
-		if monitorRect, found := findMonitor(remoteAnchor); found {
-			targetY := currentY
-			if targetY < monitorRect.Top {
-				targetY = monitorRect.Top
-			} else if targetY >= monitorRect.Bottom {
-				targetY = monitorRect.Bottom - 1
-			}
 
-			targetX := monitorRect.Right - 2
-			if targetX < monitorRect.Left {
-				targetX = monitorRect.Left
+		return leftwardReturnDistance >= leftwardReturnThreshold
+	}
+	returnToHostPointForAnchor := func(current point) point {
+		if monitorRect, found := findMonitor(remoteAnchor); found {
+			targetX := clampInt32(current.X, monitorRect.Left, monitorRect.Right-1)
+			targetY := clampInt32(current.Y, monitorRect.Top, monitorRect.Bottom-1)
+
+			switch hostSide {
+			case hostSideRight:
+				targetX = monitorRect.Left + 1
+				if targetX >= monitorRect.Right {
+					targetX = monitorRect.Left
+				}
+			case hostSideTop:
+				targetY = monitorRect.Top + 1
+				if targetY >= monitorRect.Bottom {
+					targetY = monitorRect.Top
+				}
+			case hostSideBottom:
+				targetY = monitorRect.Bottom - 2
+				if targetY < monitorRect.Top {
+					targetY = monitorRect.Top
+				}
+			default:
+				targetX = monitorRect.Right - 2
+				if targetX < monitorRect.Left {
+					targetX = monitorRect.Left
+				}
 			}
 
 			return point{X: targetX, Y: targetY}
 		}
 
-		rightEdgeX := virtualRightEdgeX()
-		return point{X: rightEdgeX - 1, Y: currentY}
+		virtualLeft := getSystemMetric(smXVirtualScreen)
+		virtualTop := getSystemMetric(smYVirtualScreen)
+		virtualWidth := getSystemMetric(smCXVirtualScreen)
+		virtualHeight := getSystemMetric(smCYVirtualScreen)
+		if virtualWidth <= 0 {
+			virtualLeft = 0
+			virtualWidth = getSystemMetric(smCXScreen)
+		}
+		if virtualHeight <= 0 {
+			virtualTop = 0
+			virtualHeight = getSystemMetric(smCYScreen)
+		}
+		if virtualWidth <= 0 {
+			virtualWidth = 1
+		}
+		if virtualHeight <= 0 {
+			virtualHeight = 1
+		}
+
+		virtualRight := virtualLeft + virtualWidth - 1
+		virtualBottom := virtualTop + virtualHeight - 1
+		targetX := clampInt32(current.X, virtualLeft, virtualRight)
+		targetY := clampInt32(current.Y, virtualTop, virtualBottom)
+
+		switch hostSide {
+		case hostSideRight:
+			targetX = virtualLeft + 1
+		case hostSideTop:
+			targetY = virtualTop + 1
+		case hostSideBottom:
+			targetY = virtualBottom - 1
+		default:
+			targetX = virtualRight - 1
+		}
+
+		return point{X: targetX, Y: targetY}
 	}
 	setRemoteAnchorForPoint := func(p point) {
 		if monitorRect, found := findMonitor(p); found {
@@ -523,6 +799,7 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 	if cursorPoint, ok := currentCursorPoint(); ok {
 		setRemoteAnchorForPoint(cursorPoint)
 	}
+	setVirtualSlaveCursorForActivation("hotkey")
 	activationAllowed := func() bool {
 		if remoteActivationAllowed == nil {
 			return true
@@ -537,11 +814,12 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 			return
 		}
 
-		returnPoint := returnToHostPointForAnchor(remoteAnchor.Y)
+		returnPoint := returnToHostPointForAnchor(remoteAnchor)
 		setCursorPosition(returnPoint.X, returnPoint.Y)
 		setRemoteModeActive(false, "serial")
 		edgeArmed = true
 		resetLeftwardReturnDistance()
+		resetEdgeReturnPressure()
 	}
 
 	mouseCallback := windows.NewCallback(func(nCode uintptr, wParam uintptr, lParam *msllHookStruct) uintptr {
@@ -562,12 +840,15 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 				if !activationAllowed() {
 					edgeArmed = true
 					resetLeftwardReturnDistance()
-				} else if canActivateFromRightEdge(lParam.Pt) {
+					resetEdgeReturnPressure()
+				} else if canActivateFromHostEdge(lParam.Pt) {
 					if edgeArmed {
+						setRemoteAnchorForPoint(lParam.Pt)
+						setVirtualSlaveCursorForActivation("edge")
 						setRemoteModeActive(true, "edge")
 						edgeArmed = false
 						resetLeftwardReturnDistance()
-						setRemoteAnchorForPoint(lParam.Pt)
+						resetEdgeReturnPressure()
 						setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
 						return 1
 					}
@@ -592,13 +873,17 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 				case wmMouseMove:
 					dx := int(lParam.Pt.X - remoteAnchor.X)
 					dy := int(lParam.Pt.Y - remoteAnchor.Y)
-					updateLeftwardReturnDistance(dx, dy)
-					if leftwardReturnDistance >= leftwardReturnThreshold {
-						returnPoint := returnToHostPointForAnchor(lParam.Pt.Y)
+					shouldReturnToHost := updateVirtualSlaveCursorAndCheckReturn(dx, dy)
+					if !shouldReturnToHost {
+						shouldReturnToHost = updateLeftwardReturnDistance(dx, dy)
+					}
+					if shouldReturnToHost {
+						returnPoint := returnToHostPointForAnchor(lParam.Pt)
 						setCursorPosition(returnPoint.X, returnPoint.Y)
-						setRemoteModeActive(false, "edge_return")
+						setRemoteModeActive(false, "slave_edge")
 						edgeArmed = false
 						resetLeftwardReturnDistance()
+						resetEdgeReturnPressure()
 						return 1
 					}
 					if dx != 0 || dy != 0 {
@@ -659,15 +944,17 @@ func runInputHooks(ctx context.Context, captureKeyboard bool, toggleHotkeyVK uin
 								if cursorPoint, ok := currentCursorPoint(); ok {
 									setRemoteAnchorForPoint(cursorPoint)
 								}
+								setVirtualSlaveCursorForActivation("hotkey")
 								setRemoteModeActive(true, "hotkey")
 								setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
 							} else {
-								returnPoint := returnToHostPointForAnchor(remoteAnchor.Y)
+								returnPoint := returnToHostPointForAnchor(remoteAnchor)
 								setCursorPosition(returnPoint.X, returnPoint.Y)
 								setRemoteModeActive(false, "hotkey")
 							}
 							edgeArmed = false
 							resetLeftwardReturnDistance()
+							resetEdgeReturnPressure()
 						}
 					}
 				} else if isKeyUp {

@@ -31,6 +31,9 @@ type guiApp struct {
 	portCombo        *walk.ComboBox
 	toggleCombo      *walk.ComboBox
 	keyboardCheck    *walk.CheckBox
+	leftReturnCheck  *walk.CheckBox
+	slaveResCombo    *walk.ComboBox
+	hostSideCombo    *walk.ComboBox
 	rateEdit         *walk.LineEdit
 	statusWidget     *walk.CustomWidget
 	statusText       string
@@ -102,6 +105,17 @@ func runGUI(initial config) error {
 			app.toggleCombo.SetText(normalized)
 		} else {
 			app.toggleCombo.SetText(defaultToggleHotkeyName)
+		}
+	}
+	if app.slaveResCombo != nil {
+		resolutionText := formatSlaveResolution(app.baseCfg.slaveWidth, app.baseCfg.slaveHeight)
+		app.slaveResCombo.SetText(resolutionText)
+	}
+	if app.hostSideCombo != nil {
+		if normalizedHostSide, ok := normalizeHostSide(app.baseCfg.hostSide); ok {
+			app.hostSideCombo.SetText(normalizedHostSide)
+		} else {
+			app.hostSideCombo.SetText(defaultHostSide)
 		}
 	}
 	app.setRunning(false)
@@ -363,8 +377,8 @@ func (app *guiApp) buildWindow() error {
 	return MainWindow{
 		AssignTo: &app.mw,
 		Title:    "ESP HID Bridge",
-		MinSize:  Size{Width: 520, Height: 140},
-		Size:     Size{Width: 560, Height: 160},
+		MinSize:  Size{Width: 620, Height: 190},
+		Size:     Size{Width: 680, Height: 210},
 		Visible:  false,
 		Layout:   VBox{},
 		Children: []Widget{
@@ -416,11 +430,40 @@ func (app *guiApp) buildWindow() error {
 						Text:     "Forward keyboard",
 						Checked:  app.baseCfg.captureKeyboard,
 					},
+					CheckBox{
+						AssignTo: &app.leftReturnCheck,
+						Text:     "Left-swipe return",
+						Checked:  app.baseCfg.leftwardReturn,
+					},
 					Label{Text: "Rate:"},
 					LineEdit{
 						AssignTo: &app.rateEdit,
 						Text:     strconv.Itoa(app.baseCfg.moveRateHz),
 						MaxSize:  Size{Width: 80},
+					},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					Label{Text: "Slave Res:"},
+					ComboBox{
+						AssignTo:     &app.slaveResCombo,
+						Model:        slaveResolutionChoices,
+						Editable:     true,
+						CurrentIndex: 3,
+						MinSize:      Size{Width: 110},
+						MaxSize:      Size{Width: 120},
+					},
+					Label{Text: "Host Side:"},
+					ComboBox{
+						AssignTo:     &app.hostSideCombo,
+						Model:        hostSideChoices,
+						Editable:     false,
+						CurrentIndex: 0,
+						MinSize:      Size{Width: 80},
+						MaxSize:      Size{Width: 90},
 					},
 					HSpacer{},
 					Label{Text: "Bridge:"},
@@ -604,6 +647,7 @@ func (app *guiApp) readConfigFromForm() (config, error) {
 	cfg := app.baseCfg
 	cfg.guiMode = true
 	cfg.captureKeyboard = app.keyboardCheck.Checked()
+	cfg.leftwardReturn = app.leftReturnCheck.Checked()
 
 	toggleName, ok := normalizeToggleHotkeyName(app.toggleCombo.Text())
 	if !ok {
@@ -629,6 +673,20 @@ func (app *guiApp) readConfigFromForm() (config, error) {
 	}
 	cfg.moveRateHz = rate
 
+	resolutionText := strings.TrimSpace(app.slaveResCombo.Text())
+	slaveWidth, slaveHeight, ok := parseSlaveResolution(resolutionText)
+	if !ok {
+		return cfg, fmt.Errorf("invalid slave resolution: %q", resolutionText)
+	}
+	cfg.slaveWidth = slaveWidth
+	cfg.slaveHeight = slaveHeight
+
+	hostSide, ok := normalizeHostSide(app.hostSideCombo.Text())
+	if !ok {
+		return cfg, fmt.Errorf("invalid host side: %q", app.hostSideCombo.Text())
+	}
+	cfg.hostSide = hostSide
+
 	return cfg, nil
 }
 
@@ -647,6 +705,15 @@ func (app *guiApp) setRunning(running bool) {
 	}
 	if app.keyboardCheck != nil {
 		app.keyboardCheck.SetEnabled(!running)
+	}
+	if app.leftReturnCheck != nil {
+		app.leftReturnCheck.SetEnabled(!running)
+	}
+	if app.slaveResCombo != nil {
+		app.slaveResCombo.SetEnabled(!running)
+	}
+	if app.hostSideCombo != nil {
+		app.hostSideCombo.SetEnabled(!running)
 	}
 	if app.rateEdit != nil {
 		app.rateEdit.SetEnabled(!running)

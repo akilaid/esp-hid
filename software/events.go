@@ -263,7 +263,17 @@ func runCaptureLoop(ctx context.Context, cfg config, queue chan string, remoteAc
 	errorChannel := make(chan error, 1)
 
 	go func() {
-		errorChannel <- runInputHooks(ctx, cfg.captureKeyboard, cfg.toggleHotkeyVK, eventChannel, remoteActivationAllowed)
+		errorChannel <- runInputHooks(
+			ctx,
+			cfg.captureKeyboard,
+			cfg.toggleHotkeyVK,
+			cfg.leftwardReturn,
+			cfg.slaveWidth,
+			cfg.slaveHeight,
+			cfg.hostSide,
+			eventChannel,
+			remoteActivationAllowed,
+		)
 		close(eventChannel)
 		close(errorChannel)
 	}()
