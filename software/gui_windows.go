@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -31,9 +32,13 @@ type guiApp struct {
 	portCombo        *walk.ComboBox
 	toggleCombo      *walk.ComboBox
 	keyboardCheck    *walk.CheckBox
-	leftReturnCheck  *walk.CheckBox
 	slaveResCombo    *walk.ComboBox
-	hostSideCombo    *walk.ComboBox
+	hostSideWidget   *walk.CustomWidget
+	selectedHostSide string
+	draggingSlave    bool
+	dragOffsetX      int
+	dragOffsetY      int
+	dragSlaveRect    walk.Rectangle
 	rateEdit         *walk.LineEdit
 	statusWidget     *walk.CustomWidget
 	statusText       string
@@ -60,6 +65,15 @@ var (
 	connectionDotColorConnected = walk.RGB(46, 185, 89)
 	connectionDotColorWaiting   = walk.RGB(209, 154, 30)
 	connectionDotColorFailed    = walk.RGB(214, 69, 65)
+
+	hostSideBgColor        = walk.RGB(245, 247, 250)
+	hostSideFrameColor     = walk.RGB(188, 196, 208)
+	hostSideHostFillColor  = walk.RGB(23, 122, 205)
+	hostSideHostLineColor  = walk.RGB(16, 87, 147)
+	hostSideHostTextColor  = walk.RGB(255, 255, 255)
+	hostSideSlaveFillColor = walk.RGB(231, 236, 244)
+	hostSideSlaveLineColor = walk.RGB(120, 130, 146)
+	hostSideSlaveTextColor = walk.RGB(66, 74, 90)
 )
 
 func runGUI(initial config) error {
@@ -111,13 +125,13 @@ func runGUI(initial config) error {
 		resolutionText := formatSlaveResolution(app.baseCfg.slaveWidth, app.baseCfg.slaveHeight)
 		app.slaveResCombo.SetText(resolutionText)
 	}
-	if app.hostSideCombo != nil {
-		if normalizedHostSide, ok := normalizeHostSide(app.baseCfg.hostSide); ok {
-			app.hostSideCombo.SetText(normalizedHostSide)
-		} else {
-			app.hostSideCombo.SetText(defaultHostSide)
-		}
+	if normalizedHostSide, ok := normalizeHostSide(app.baseCfg.hostSide); ok {
+		app.selectedHostSide = normalizedHostSide
+	} else {
+		app.selectedHostSide = defaultHostSide
 	}
+	app.baseCfg.hostSide = app.selectedHostSide
+	app.attachHostSideWidgetEvents()
 	app.setRunning(false)
 	app.setStatusText("Stopped")
 	app.setConnectionIndicator(connectionIndicatorWaiting)
@@ -246,6 +260,295 @@ func (app *guiApp) paintStatusText(canvas *walk.Canvas, bounds walk.Rectangle) e
 
 	format := walk.TextLeft | walk.TextVCenter | walk.TextSingleLine | walk.TextEndEllipsis
 	return canvas.DrawTextPixels(app.statusText, font, app.statusColor, bounds, format)
+}
+
+func clampInt(value int, minValue int, maxValue int) int {
+	if maxValue < minValue {
+		return minValue
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func rectContainsPoint(rect walk.Rectangle, x int, y int) bool {
+	return x >= rect.X && x < rect.X+rect.Width && y >= rect.Y && y < rect.Y+rect.Height
+}
+
+func fitResolutionToBox(width int, height int, maxWidth int, maxHeight int) (int, int) {
+	if maxWidth <= 0 || maxHeight <= 0 {
+		return 1, 1
+	}
+	if width <= 0 || height <= 0 {
+		return maxWidth, maxHeight
+	}
+
+	scale := math.Min(float64(maxWidth)/float64(width), float64(maxHeight)/float64(height))
+	if scale <= 0 {
+		return maxWidth, maxHeight
+	}
+
+	fittedWidth := int(math.Round(float64(width) * scale))
+	fittedHeight := int(math.Round(float64(height) * scale))
+
+	if fittedWidth < 28 {
+		fittedWidth = 28
+	}
+	if fittedHeight < 28 {
+		fittedHeight = 28
+	}
+
+	fittedWidth = clampInt(fittedWidth, 1, maxWidth)
+	fittedHeight = clampInt(fittedHeight, 1, maxHeight)
+
+	return fittedWidth, fittedHeight
+}
+
+func (app *guiApp) selectedHostSideOrDefault() string {
+	if normalizedHostSide, ok := normalizeHostSide(app.selectedHostSide); ok {
+		return normalizedHostSide
+	}
+	if normalizedHostSide, ok := normalizeHostSide(app.baseCfg.hostSide); ok {
+		return normalizedHostSide
+	}
+	return defaultHostSide
+}
+
+func (app *guiApp) setSelectedHostSide(side string) {
+	normalizedHostSide, ok := normalizeHostSide(side)
+	if !ok {
+		normalizedHostSide = defaultHostSide
+	}
+
+	if app.selectedHostSide == normalizedHostSide {
+		return
+	}
+
+	app.selectedHostSide = normalizedHostSide
+	app.baseCfg.hostSide = normalizedHostSide
+
+	if app.hostSideWidget != nil {
+		app.hostSideWidget.Invalidate()
+	}
+}
+
+func (app *guiApp) slavePreviewResolution() (int, int) {
+	if app.slaveResCombo != nil {
+		if width, height, ok := parseSlaveResolution(app.slaveResCombo.Text()); ok {
+			return width, height
+		}
+	}
+
+	if app.baseCfg.slaveWidth > 0 && app.baseCfg.slaveHeight > 0 {
+		return app.baseCfg.slaveWidth, app.baseCfg.slaveHeight
+	}
+
+	return defaultSlaveWidth, defaultSlaveHeight
+}
+
+func (app *guiApp) hostSideLayoutRects(bounds walk.Rectangle) (walk.Rectangle, walk.Rectangle, walk.Rectangle) {
+	padding := 6
+	layoutArea := walk.Rectangle{
+		X:      bounds.X + padding,
+		Y:      bounds.Y + padding,
+		Width:  bounds.Width - 2*padding,
+		Height: bounds.Height - 2*padding,
+	}
+
+	if layoutArea.Width < 80 {
+		layoutArea.Width = 80
+	}
+	if layoutArea.Height < 64 {
+		layoutArea.Height = 64
+	}
+
+	hostWidth := clampInt(layoutArea.Width/3, 58, 86)
+	hostHeight := clampInt(layoutArea.Height/2, 40, 60)
+	hostRect := walk.Rectangle{
+		X:      layoutArea.X + (layoutArea.Width-hostWidth)/2,
+		Y:      layoutArea.Y + (layoutArea.Height-hostHeight)/2,
+		Width:  hostWidth,
+		Height: hostHeight,
+	}
+
+	slaveWidth, slaveHeight := app.slavePreviewResolution()
+	previewSlaveWidth, previewSlaveHeight := fitResolutionToBox(slaveWidth, slaveHeight, hostWidth, hostHeight+8)
+	slaveRect := walk.Rectangle{Width: previewSlaveWidth, Height: previewSlaveHeight}
+
+	gap := clampInt(layoutArea.Width/12, 10, 20)
+	switch app.selectedHostSideOrDefault() {
+	case hostSideRight:
+		slaveRect.X = hostRect.X - gap - slaveRect.Width
+		slaveRect.Y = hostRect.Y + (hostRect.Height-slaveRect.Height)/2
+	case hostSideTop:
+		slaveRect.X = hostRect.X + (hostRect.Width-slaveRect.Width)/2
+		slaveRect.Y = hostRect.Y + hostRect.Height + gap
+	case hostSideBottom:
+		slaveRect.X = hostRect.X + (hostRect.Width-slaveRect.Width)/2
+		slaveRect.Y = hostRect.Y - gap - slaveRect.Height
+	default:
+		slaveRect.X = hostRect.X + hostRect.Width + gap
+		slaveRect.Y = hostRect.Y + (hostRect.Height-slaveRect.Height)/2
+	}
+
+	slaveRect.X = clampInt(slaveRect.X, layoutArea.X, layoutArea.X+layoutArea.Width-slaveRect.Width)
+	slaveRect.Y = clampInt(slaveRect.Y, layoutArea.Y, layoutArea.Y+layoutArea.Height-slaveRect.Height)
+
+	return layoutArea, hostRect, slaveRect
+}
+
+func (app *guiApp) resolveHostSideFromDelta(dx int, dy int) string {
+	if absInt(dx) >= absInt(dy) {
+		if dx >= 0 {
+			return hostSideLeft
+		}
+		return hostSideRight
+	}
+
+	if dy >= 0 {
+		return hostSideTop
+	}
+
+	return hostSideBottom
+}
+
+func (app *guiApp) resolveHostSideFromRect(slaveRect walk.Rectangle, hostRect walk.Rectangle) string {
+	slaveCenterX := slaveRect.X + slaveRect.Width/2
+	slaveCenterY := slaveRect.Y + slaveRect.Height/2
+	hostCenterX := hostRect.X + hostRect.Width/2
+	hostCenterY := hostRect.Y + hostRect.Height/2
+
+	return app.resolveHostSideFromDelta(slaveCenterX-hostCenterX, slaveCenterY-hostCenterY)
+}
+
+func (app *guiApp) paintHostSideLayout(canvas *walk.Canvas, bounds walk.Rectangle) error {
+	layoutArea, hostRect, slaveRect := app.hostSideLayoutRects(bounds)
+	if app.draggingSlave {
+		slaveRect = app.dragSlaveRect
+	}
+
+	backgroundBrush, _ := walk.NewSolidColorBrush(hostSideBgColor)
+	if backgroundBrush != nil {
+		defer backgroundBrush.Dispose()
+		_ = canvas.FillRectanglePixels(backgroundBrush, layoutArea)
+	}
+
+	framePen, _ := walk.NewCosmeticPen(walk.PenSolid, hostSideFrameColor)
+	if framePen != nil {
+		defer framePen.Dispose()
+		_ = canvas.DrawRectanglePixels(framePen, layoutArea)
+	}
+
+	hostBrush, _ := walk.NewSolidColorBrush(hostSideHostFillColor)
+	hostPen, _ := walk.NewCosmeticPen(walk.PenSolid, hostSideHostLineColor)
+	if hostBrush != nil {
+		defer hostBrush.Dispose()
+		_ = canvas.FillRectanglePixels(hostBrush, hostRect)
+	}
+	if hostPen != nil {
+		defer hostPen.Dispose()
+		_ = canvas.DrawRectanglePixels(hostPen, hostRect)
+	}
+
+	slaveBrush, _ := walk.NewSolidColorBrush(hostSideSlaveFillColor)
+	slavePen, _ := walk.NewCosmeticPen(walk.PenSolid, hostSideSlaveLineColor)
+	if slaveBrush != nil {
+		defer slaveBrush.Dispose()
+		_ = canvas.FillRectanglePixels(slaveBrush, slaveRect)
+	}
+	if slavePen != nil {
+		defer slavePen.Dispose()
+		_ = canvas.DrawRectanglePixels(slavePen, slaveRect)
+	}
+
+	font := app.mw.Font()
+	if app.hostSideWidget != nil && app.hostSideWidget.Font() != nil {
+		font = app.hostSideWidget.Font()
+	}
+
+	if font != nil {
+		centerFormat := walk.TextCenter | walk.TextVCenter | walk.TextSingleLine
+		_ = canvas.DrawTextPixels("1", font, hostSideHostTextColor, hostRect, centerFormat)
+		_ = canvas.DrawTextPixels("2", font, hostSideSlaveTextColor, slaveRect, centerFormat)
+	}
+
+	return nil
+}
+
+func (app *guiApp) attachHostSideWidgetEvents() {
+	if app.hostSideWidget == nil {
+		return
+	}
+
+	if app.slaveResCombo != nil {
+		app.slaveResCombo.TextChanged().Attach(func() {
+			if app.hostSideWidget != nil {
+				app.hostSideWidget.Invalidate()
+			}
+		})
+		app.slaveResCombo.CurrentIndexChanged().Attach(func() {
+			if app.hostSideWidget != nil {
+				app.hostSideWidget.Invalidate()
+			}
+		})
+	}
+
+	_ = app.hostSideWidget.SetToolTipText("Drag display 2 around display 1 to set device placement")
+
+	app.hostSideWidget.MouseDown().Attach(func(x int, y int, button walk.MouseButton) {
+		if button != walk.LeftButton || app.hostSideWidget == nil || !app.hostSideWidget.Enabled() {
+			return
+		}
+
+		layoutArea, hostRect, slaveRect := app.hostSideLayoutRects(app.hostSideWidget.ClientBoundsPixels())
+		if rectContainsPoint(slaveRect, x, y) {
+			app.draggingSlave = true
+			app.dragOffsetX = x - slaveRect.X
+			app.dragOffsetY = y - slaveRect.Y
+			app.dragSlaveRect = slaveRect
+			return
+		}
+
+		hostCenterX := hostRect.X + hostRect.Width/2
+		hostCenterY := hostRect.Y + hostRect.Height/2
+		if !rectContainsPoint(layoutArea, x, y) {
+			return
+		}
+		app.setSelectedHostSide(app.resolveHostSideFromDelta(x-hostCenterX, y-hostCenterY))
+	})
+
+	app.hostSideWidget.MouseMove().Attach(func(x int, y int, _ walk.MouseButton) {
+		if !app.draggingSlave || app.hostSideWidget == nil || !app.hostSideWidget.Enabled() {
+			return
+		}
+
+		layoutArea, hostRect, _ := app.hostSideLayoutRects(app.hostSideWidget.ClientBoundsPixels())
+		dragRect := app.dragSlaveRect
+		dragRect.X = x - app.dragOffsetX
+		dragRect.Y = y - app.dragOffsetY
+		dragRect.X = clampInt(dragRect.X, layoutArea.X, layoutArea.X+layoutArea.Width-dragRect.Width)
+		dragRect.Y = clampInt(dragRect.Y, layoutArea.Y, layoutArea.Y+layoutArea.Height-dragRect.Height)
+		app.dragSlaveRect = dragRect
+
+		app.setSelectedHostSide(app.resolveHostSideFromRect(dragRect, hostRect))
+		app.hostSideWidget.Invalidate()
+	})
+
+	app.hostSideWidget.MouseUp().Attach(func(_ int, _ int, button walk.MouseButton) {
+		if button != walk.LeftButton || !app.draggingSlave {
+			return
+		}
+
+		app.draggingSlave = false
+		app.dragSlaveRect = walk.Rectangle{}
+		if app.hostSideWidget != nil {
+			app.hostSideWidget.Invalidate()
+		}
+	})
 }
 
 func (app *guiApp) setupTray() error {
@@ -377,21 +680,24 @@ func (app *guiApp) buildWindow() error {
 	return MainWindow{
 		AssignTo: &app.mw,
 		Title:    "ESP HID Bridge",
-		MinSize:  Size{Width: 620, Height: 190},
-		Size:     Size{Width: 680, Height: 210},
+		MinSize:  Size{Width: 680, Height: 185},
+		Size:     Size{Width: 700, Height: 205},
 		Visible:  false,
-		Layout:   VBox{},
+		Layout: VBox{
+			Spacing: 6,
+			Margins: Margins{Left: 8, Top: 8, Right: 8, Bottom: 8},
+		},
 		Children: []Widget{
 			Composite{
-				Layout: HBox{},
+				Layout: HBox{Spacing: 6, MarginsZero: true},
 				Children: []Widget{
 					Label{Text: "Serial Port:"},
 					ComboBox{
 						AssignTo:     &app.portCombo,
 						Model:        []string{"auto"},
 						Editable:     false,
-						MaxSize:      Size{Width: 150},
-						MinSize:      Size{Width: 130},
+						MaxSize:      Size{Width: 140},
+						MinSize:      Size{Width: 120},
 						CurrentIndex: 0,
 					},
 					PushButton{
@@ -414,7 +720,7 @@ func (app *guiApp) buildWindow() error {
 				},
 			},
 			Composite{
-				Layout: HBox{},
+				Layout: HBox{Spacing: 6, MarginsZero: true},
 				Children: []Widget{
 					Label{Text: "Toggle:"},
 					ComboBox{
@@ -422,30 +728,25 @@ func (app *guiApp) buildWindow() error {
 						Model:        toggleHotkeyChoices,
 						Editable:     false,
 						CurrentIndex: 8,
-						MinSize:      Size{Width: 68},
-						MaxSize:      Size{Width: 68},
+						MinSize:      Size{Width: 60},
+						MaxSize:      Size{Width: 60},
 					},
 					CheckBox{
 						AssignTo: &app.keyboardCheck,
 						Text:     "Forward keyboard",
 						Checked:  app.baseCfg.captureKeyboard,
 					},
-					CheckBox{
-						AssignTo: &app.leftReturnCheck,
-						Text:     "Left-swipe return",
-						Checked:  app.baseCfg.leftwardReturn,
-					},
 					Label{Text: "Rate:"},
 					LineEdit{
 						AssignTo: &app.rateEdit,
 						Text:     strconv.Itoa(app.baseCfg.moveRateHz),
-						MaxSize:  Size{Width: 80},
+						MaxSize:  Size{Width: 64},
+						MinSize:  Size{Width: 64},
 					},
-					HSpacer{},
 				},
 			},
 			Composite{
-				Layout: HBox{},
+				Layout: HBox{Spacing: 6, MarginsZero: true},
 				Children: []Widget{
 					Label{Text: "Slave Res:"},
 					ComboBox{
@@ -453,30 +754,29 @@ func (app *guiApp) buildWindow() error {
 						Model:        slaveResolutionChoices,
 						Editable:     true,
 						CurrentIndex: 3,
-						MinSize:      Size{Width: 110},
-						MaxSize:      Size{Width: 120},
+						MinSize:      Size{Width: 104},
+						MaxSize:      Size{Width: 112},
 					},
-					Label{Text: "Host Side:"},
-					ComboBox{
-						AssignTo:     &app.hostSideCombo,
-						Model:        hostSideChoices,
-						Editable:     false,
-						CurrentIndex: 0,
-						MinSize:      Size{Width: 80},
-						MaxSize:      Size{Width: 90},
+					Label{Text: "Layout:"},
+					CustomWidget{
+						AssignTo:    &app.hostSideWidget,
+						PaintPixels: app.paintHostSideLayout,
+						MinSize:     Size{Width: 185, Height: 82},
+						MaxSize:     Size{Width: 185, Height: 82},
 					},
 					HSpacer{},
 					Label{Text: "Bridge:"},
 					CustomWidget{
 						AssignTo:    &app.statusWidget,
 						PaintPixels: app.paintStatusText,
-						MinSize:     Size{Width: 98, Height: 18},
-						MaxSize:     Size{Width: 98, Height: 18},
+						MinSize:     Size{Width: 88, Height: 18},
+						MaxSize:     Size{Width: 88, Height: 18},
 					},
-					Label{Text: "Connected Port:"},
+					Label{Text: "Port:"},
 					Label{
 						AssignTo: &app.activePortLabel,
 						Text:     "-",
+						MinSize:  Size{Width: 52},
 					},
 				},
 			},
@@ -647,7 +947,6 @@ func (app *guiApp) readConfigFromForm() (config, error) {
 	cfg := app.baseCfg
 	cfg.guiMode = true
 	cfg.captureKeyboard = app.keyboardCheck.Checked()
-	cfg.leftwardReturn = app.leftReturnCheck.Checked()
 
 	toggleName, ok := normalizeToggleHotkeyName(app.toggleCombo.Text())
 	if !ok {
@@ -681,11 +980,12 @@ func (app *guiApp) readConfigFromForm() (config, error) {
 	cfg.slaveWidth = slaveWidth
 	cfg.slaveHeight = slaveHeight
 
-	hostSide, ok := normalizeHostSide(app.hostSideCombo.Text())
+	hostSide, ok := normalizeHostSide(app.selectedHostSideOrDefault())
 	if !ok {
-		return cfg, fmt.Errorf("invalid host side: %q", app.hostSideCombo.Text())
+		return cfg, fmt.Errorf("invalid host side: %q", app.selectedHostSide)
 	}
 	cfg.hostSide = hostSide
+	app.baseCfg.hostSide = hostSide
 
 	return cfg, nil
 }
@@ -706,14 +1006,11 @@ func (app *guiApp) setRunning(running bool) {
 	if app.keyboardCheck != nil {
 		app.keyboardCheck.SetEnabled(!running)
 	}
-	if app.leftReturnCheck != nil {
-		app.leftReturnCheck.SetEnabled(!running)
-	}
 	if app.slaveResCombo != nil {
 		app.slaveResCombo.SetEnabled(!running)
 	}
-	if app.hostSideCombo != nil {
-		app.hostSideCombo.SetEnabled(!running)
+	if app.hostSideWidget != nil {
+		app.hostSideWidget.SetEnabled(!running)
 	}
 	if app.rateEdit != nil {
 		app.rateEdit.SetEnabled(!running)

@@ -115,7 +115,7 @@ Bridge status in GUI:
 	- moving cursor to the host-side boundary (right edge when `-host-side=left`, left edge when `-host-side=right`, etc.), or
 	- pressing toggle hotkey (default `F9`, configurable `F1`-`F12`).
 - Host return always works via the toggle hotkey.
-- Edge-aware return can be configured with slave resolution and host-side placement settings (GUI dropdowns or CLI flags). With these set, return to host happens only when you push against the configured host-side edge of the virtual slave surface.
+- Edge-aware return can be configured with slave resolution and host-side placement settings (GUI drag layout selector or CLI flags). With these set, return to host happens only when you push against the configured host-side edge of the virtual slave surface.
 - Optional left-swipe return can also be enabled (`-leftreturn=true`) as a fallback gesture.
 - Toggle hotkey only works when serial connection is healthy.
 - If serial drops while remote mode is active, remote mode is disabled and release commands are sent.
