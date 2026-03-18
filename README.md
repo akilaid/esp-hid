@@ -204,3 +204,7 @@ air -c .air.toml
 - Hotkey does nothing:
 	- expected when serial connection is down; reconnect first.
 
+---
+
+**Note**: This project was developed for my personal requirements and may not be optimum for everyone's needs. Feel free to modify it for your own requirements.
+
