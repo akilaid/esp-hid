@@ -32,6 +32,7 @@ var (
 	procSetSystemCursor     = user32.NewProc("SetSystemCursor")
 	procSystemParametersW   = user32.NewProc("SystemParametersInfoW")
 	procSetCursorPos        = user32.NewProc("SetCursorPos")
+	procGetKeyState         = user32.NewProc("GetKeyState")
 )
 
 const (
@@ -150,6 +151,28 @@ type monitorRect struct {
 
 func (rect monitorRect) containsPoint(p point) bool {
 	return p.X >= rect.Left && p.X < rect.Right && p.Y >= rect.Top && p.Y < rect.Bottom
+}
+
+// currentMods samples the live modifier key state and returns a hotkeyMod bitmask.
+func currentMods() uint32 {
+	isDown := func(vk uintptr) bool {
+		ret, _, _ := procGetKeyState.Call(vk)
+		return (ret & 0x8000) != 0
+	}
+	var mods uint32
+	if isDown(vkLControl) || isDown(vkRControl) {
+		mods |= hotkeyModCtrl
+	}
+	if isDown(vkLMenu) || isDown(vkRMenu) {
+		mods |= hotkeyModAlt
+	}
+	if isDown(vkLShift) || isDown(vkRShift) {
+		mods |= hotkeyModShift
+	}
+	if isDown(vkLWin) || isDown(vkRWin) {
+		mods |= hotkeyModWin
+	}
+	return mods
 }
 
 func (rect monitorRect) centerPoint() point {
@@ -451,10 +474,12 @@ func runInputHooks(
 	ctx context.Context,
 	captureKeyboard bool,
 	toggleHotkeyVK uint32,
+	toggleHotkeyMods uint32,
 	leftwardReturnEnabled bool,
 	slaveWidth int,
 	slaveHeight int,
 	hostSide string,
+	autoSwitchEnabled bool,
 	out chan<- inputEvent,
 	remoteActivationAllowed func() bool,
 ) error {
@@ -841,7 +866,7 @@ func runInputHooks(
 					edgeArmed = true
 					resetLeftwardReturnDistance()
 					resetEdgeReturnPressure()
-				} else if canActivateFromHostEdge(lParam.Pt) {
+				} else if autoSwitchEnabled && canActivateFromHostEdge(lParam.Pt) {
 					if edgeArmed {
 						setRemoteAnchorForPoint(lParam.Pt)
 						setVirtualSlaveCursorForActivation("edge")
@@ -932,7 +957,7 @@ func runInputHooks(
 			isKeyUp := message == wmKeyUp || message == wmSysKeyUp
 			isInjected := (lParam.Flags & llkhfInjected) != 0
 
-			if lParam.VkCode == toggleHotkeyVK && !isInjected {
+			if lParam.VkCode == toggleHotkeyVK && !isInjected && currentMods() == toggleHotkeyMods {
 				consumeHotkey := remoteModeActive || activationAllowed()
 
 				if isKeyDown {

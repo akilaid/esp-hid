@@ -267,10 +267,12 @@ func runCaptureLoop(ctx context.Context, cfg config, queue chan string, remoteAc
 			ctx,
 			cfg.captureKeyboard,
 			cfg.toggleHotkeyVK,
+			cfg.toggleHotkeyMods,
 			cfg.leftwardReturn,
 			cfg.slaveWidth,
 			cfg.slaveHeight,
 			cfg.hostSide,
+			cfg.autoSwitch,
 			eventChannel,
 			remoteActivationAllowed,
 		)

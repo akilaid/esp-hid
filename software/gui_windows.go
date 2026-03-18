@@ -31,7 +31,9 @@ type guiApp struct {
 	trayFallbackIcon *walk.Icon
 	remoteModeActive bool
 	portCombo        *walk.ComboBox
-	toggleCombo      *walk.ComboBox
+	hotkeyLabel      *walk.Label
+	hotkeyRecordBtn  *walk.PushButton
+	recordingHotkey  bool
 	keyboardCheck    *walk.CheckBox
 	slaveResCombo    *walk.ComboBox
 	hostSideWidget   *walk.CustomWidget
@@ -41,6 +43,8 @@ type guiApp struct {
 	dragOffsetY      int
 	dragSlaveRect    walk.Rectangle
 	rateEdit         *walk.LineEdit
+	autoSwitchRadio  *walk.RadioButton
+	toggleModeRadio  *walk.RadioButton
 	statusWidget     *walk.CustomWidget
 	statusText       string
 	statusColor      walk.Color
@@ -114,12 +118,12 @@ func runGUI(initial config) error {
 	})
 
 	app.refreshPorts()
-	if app.toggleCombo != nil {
+	if app.hotkeyLabel != nil {
 		toggleName := app.baseCfg.toggleHotkeyName
 		if normalized, ok := normalizeToggleHotkeyName(toggleName); ok {
-			app.toggleCombo.SetText(normalized)
+			app.hotkeyLabel.SetText(normalized)
 		} else {
-			app.toggleCombo.SetText(defaultToggleHotkeyName)
+			app.hotkeyLabel.SetText(defaultToggleHotkeyName)
 		}
 	}
 	if app.slaveResCombo != nil {
@@ -132,10 +136,29 @@ func runGUI(initial config) error {
 		app.selectedHostSide = defaultHostSide
 	}
 	app.baseCfg.hostSide = app.selectedHostSide
+	if app.autoSwitchRadio != nil {
+		app.autoSwitchRadio.SetChecked(app.baseCfg.autoSwitch)
+		app.autoSwitchRadio.CheckedChanged().Attach(func() {
+			if app.autoSwitchRadio.Checked() {
+				app.baseCfg.autoSwitch = true
+				app.updateModeDependentWidgets()
+			}
+		})
+	}
+	if app.toggleModeRadio != nil {
+		app.toggleModeRadio.SetChecked(!app.baseCfg.autoSwitch)
+		app.toggleModeRadio.CheckedChanged().Attach(func() {
+			if app.toggleModeRadio.Checked() {
+				app.baseCfg.autoSwitch = false
+				app.updateModeDependentWidgets()
+			}
+		})
+	}
 	app.attachHostSideWidgetEvents()
 	app.setRunning(false)
 	app.setStatusText("Stopped")
 	app.setConnectionIndicator(connectionIndicatorWaiting)
+	app.updateModeDependentWidgets()
 
 	go app.consumeEvents()
 	go app.backgroundRefresh()
@@ -681,31 +704,46 @@ func (app *guiApp) buildWindow() error {
 	return MainWindow{
 		AssignTo: &app.mw,
 		Title:    "ESP HID Bridge",
-		MinSize:  Size{Width: 680, Height: 185},
-		Size:     Size{Width: 700, Height: 205},
+		MinSize:  Size{Width: 620, Height: 340},
+		Size:     Size{Width: 640, Height: 360},
 		Visible:  false,
 		Layout: VBox{
-			Spacing: 6,
-			Margins: Margins{Left: 8, Top: 8, Right: 8, Bottom: 8},
+			Spacing: 4,
+			Margins: Margins{Left: 10, Top: 10, Right: 10, Bottom: 10},
 		},
 		Children: []Widget{
-			Composite{
-				Layout: HBox{Spacing: 6, MarginsZero: true},
+			GroupBox{
+				Title:  "Connection & Status",
+				Layout: HBox{Spacing: 5},
 				Children: []Widget{
 					Label{Text: "Serial Port:"},
 					ComboBox{
 						AssignTo:     &app.portCombo,
 						Model:        []string{"auto"},
 						Editable:     false,
-						MaxSize:      Size{Width: 140},
-						MinSize:      Size{Width: 120},
+						MaxSize:      Size{Width: 100},
+						MinSize:      Size{Width: 100},
 						CurrentIndex: 0,
 					},
 					PushButton{
-						Text: "Refresh Devices",
+						Text: "Refresh",
 						OnClicked: func() {
 							app.refreshPorts()
 						},
+					},
+					HSpacer{},
+					Label{Text: "Status:"},
+					CustomWidget{
+						AssignTo:    &app.statusWidget,
+						PaintPixels: app.paintStatusText,
+						MinSize:     Size{Width: 110, Height: 18},
+						MaxSize:     Size{Width: 110, Height: 18},
+					},
+					Label{Text: "Port:"},
+					Label{
+						AssignTo: &app.activePortLabel,
+						Text:     "-",
+						MinSize:  Size{Width: 40},
 					},
 					HSpacer{},
 					PushButton{
@@ -721,64 +759,101 @@ func (app *guiApp) buildWindow() error {
 				},
 			},
 			Composite{
-				Layout: HBox{Spacing: 6, MarginsZero: true},
+				Layout: HBox{Spacing: 5, MarginsZero: true},
 				Children: []Widget{
-					Label{Text: "Toggle:"},
-					ComboBox{
-						AssignTo:     &app.toggleCombo,
-						Model:        toggleHotkeyChoices,
-						Editable:     false,
-						CurrentIndex: 8,
-						MinSize:      Size{Width: 60},
-						MaxSize:      Size{Width: 60},
+					GroupBox{
+						Title:  "Input Settings",
+						Layout: VBox{Spacing: 5},
+						Children: []Widget{
+							Composite{
+							Layout: HBox{Spacing: 5, MarginsZero: true},
+							Children: []Widget{
+								Label{Text: "Toggle Hotkey:", MinSize: Size{Width: 85}},
+								Label{
+									AssignTo:  &app.hotkeyLabel,
+									Text:      app.baseCfg.toggleHotkeyName,
+									MinSize:   Size{Width: 60},
+								},
+								PushButton{
+									AssignTo: &app.hotkeyRecordBtn,
+									Text:     "Record",
+									OnClicked: func() {
+										app.startHotkeyRecording()
+									},
+								},
+							},
+						},
+							Composite{
+								Layout: HBox{Spacing: 5, MarginsZero: true},
+								Children: []Widget{
+									Label{Text: "Send Rate (Hz):", MinSize: Size{Width: 85}},
+									LineEdit{
+										AssignTo: &app.rateEdit,
+										Text:     strconv.Itoa(app.baseCfg.moveRateHz),
+										MaxSize:  Size{Width: 40},
+									},
+								},
+							},
+							CheckBox{
+								AssignTo: &app.keyboardCheck,
+								Text:     "Forward Keyboard",
+								Checked:  app.baseCfg.captureKeyboard,
+							},
+						},
 					},
-					CheckBox{
-						AssignTo: &app.keyboardCheck,
-						Text:     "Forward keyboard",
-						Checked:  app.baseCfg.captureKeyboard,
-					},
-					Label{Text: "Rate:"},
-					LineEdit{
-						AssignTo: &app.rateEdit,
-						Text:     strconv.Itoa(app.baseCfg.moveRateHz),
-						MaxSize:  Size{Width: 64},
-						MinSize:  Size{Width: 64},
+					GroupBox{
+						Title:  "Switching Mode",
+						Layout: HBox{MarginsZero: true},
+						Children: []Widget{
+							Composite{
+								Layout: VBox{Spacing: 8, Alignment: AlignHNearVNear},
+								Children: []Widget{
+									RadioButton{
+										AssignTo: &app.autoSwitchRadio,
+										Text:     "Auto (Switch at edge of screens)",
+									},
+									RadioButton{
+										AssignTo: &app.toggleModeRadio,
+										Text:     "Manual (Hotkey toggle only)",
+									},
+								},
+							},
+							HSpacer{},
+						},
 					},
 				},
 			},
-			Composite{
-				Layout: HBox{Spacing: 6, MarginsZero: true},
+			GroupBox{
+				Title:  "Device Layout & Resolution",
+				Layout: HBox{Spacing: 10},
 				Children: []Widget{
-					Label{Text: "Slave Res:"},
-					ComboBox{
-						AssignTo:     &app.slaveResCombo,
-						Model:        slaveResolutionChoices,
-						Editable:     true,
-						CurrentIndex: 3,
-						MinSize:      Size{Width: 104},
-						MaxSize:      Size{Width: 112},
+					Composite{
+						Layout: VBox{Spacing: 5},
+						Children: []Widget{
+							Label{Text: "Slave Resolution:"},
+							ComboBox{
+								AssignTo:     &app.slaveResCombo,
+								Model:        slaveResolutionChoices,
+								Editable:     true,
+								CurrentIndex: 3,
+								MinSize:      Size{Width: 120},
+							},
+							VSpacer{},
+						},
 					},
-					Label{Text: "Layout:"},
-					CustomWidget{
-						AssignTo:    &app.hostSideWidget,
-						PaintPixels: app.paintHostSideLayout,
-						MinSize:     Size{Width: 185, Height: 82},
-						MaxSize:     Size{Width: 185, Height: 82},
+					Composite{
+						Layout: VBox{Spacing: 5},
+						Children: []Widget{
+							Label{Text: "Placement (Drag #2 around #1):"},
+							CustomWidget{
+								AssignTo:    &app.hostSideWidget,
+								PaintPixels: app.paintHostSideLayout,
+								MinSize:     Size{Width: 185, Height: 82},
+								MaxSize:     Size{Width: 185, Height: 82},
+							},
+						},
 					},
 					HSpacer{},
-					Label{Text: "Bridge:"},
-					CustomWidget{
-						AssignTo:    &app.statusWidget,
-						PaintPixels: app.paintStatusText,
-						MinSize:     Size{Width: 88, Height: 18},
-						MaxSize:     Size{Width: 88, Height: 18},
-					},
-					Label{Text: "Port:"},
-					Label{
-						AssignTo: &app.activePortLabel,
-						Text:     "-",
-						MinSize:  Size{Width: 52},
-					},
 				},
 			},
 		},
@@ -952,10 +1027,13 @@ func (app *guiApp) readConfigFromForm() (config, error) {
 	cfg := app.baseCfg
 	cfg.guiMode = true
 	cfg.captureKeyboard = app.keyboardCheck.Checked()
+	cfg.autoSwitch = app.autoSwitchRadio.Checked()
 
-	toggleName, ok := normalizeToggleHotkeyName(app.toggleCombo.Text())
-	if !ok {
-		return cfg, fmt.Errorf("invalid toggle hotkey: %q", app.toggleCombo.Text())
+	toggleName := app.baseCfg.toggleHotkeyName
+	if n, ok := normalizeToggleHotkeyName(toggleName); ok {
+		toggleName = n
+	} else {
+		toggleName = defaultToggleHotkeyName
 	}
 	toggleVK, _ := toggleHotkeyNameToVK(toggleName)
 	cfg.toggleHotkeyName = toggleName
@@ -1005,8 +1083,8 @@ func (app *guiApp) setRunning(running bool) {
 	if app.portCombo != nil {
 		app.portCombo.SetEnabled(!running)
 	}
-	if app.toggleCombo != nil {
-		app.toggleCombo.SetEnabled(!running)
+	if app.hotkeyRecordBtn != nil {
+		app.hotkeyRecordBtn.SetEnabled(!running)
 	}
 	if app.keyboardCheck != nil {
 		app.keyboardCheck.SetEnabled(!running)
@@ -1019,5 +1097,40 @@ func (app *guiApp) setRunning(running bool) {
 	}
 	if app.rateEdit != nil {
 		app.rateEdit.SetEnabled(!running)
+	}
+	if app.autoSwitchRadio != nil {
+		app.autoSwitchRadio.SetEnabled(!running)
+	}
+	if app.toggleModeRadio != nil {
+		app.toggleModeRadio.SetEnabled(!running)
+	}
+
+	app.updateModeDependentWidgets()
+}
+
+func (app *guiApp) updateModeDependentWidgets() {
+	if app.mw == nil {
+		return
+	}
+
+	// Mode-dependent widgets are only enabled if the bridge is NOT running
+	// AND the "Auto (Edge)" radio button is selected.
+	running := false
+	if app.startButton != nil {
+		running = !app.startButton.Enabled()
+	}
+
+	autoMode := false
+	if app.autoSwitchRadio != nil {
+		autoMode = app.autoSwitchRadio.Checked()
+	}
+
+	enabled := !running && autoMode
+
+	if app.slaveResCombo != nil {
+		app.slaveResCombo.SetEnabled(enabled)
+	}
+	if app.hostSideWidget != nil {
+		app.hostSideWidget.SetEnabled(enabled)
 	}
 }

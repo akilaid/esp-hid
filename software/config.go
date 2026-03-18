@@ -31,6 +31,8 @@ type config struct {
 	captureKeyboard  bool
 	toggleHotkeyName string
 	toggleHotkeyVK   uint32
+	toggleHotkeyMods uint32
+	autoSwitch       bool
 	guiMode          bool
 }
 
@@ -151,7 +153,7 @@ func normalizeHostSide(value string) (string, bool) {
 }
 
 func defaultConfig() config {
-	toggleVK, _ := toggleHotkeyNameToVK(defaultToggleHotkeyName)
+	toggleVK, toggleMods := toggleHotkeyNameToVKMods(defaultToggleHotkeyName)
 
 	return config{
 		portName:         "auto",
@@ -169,6 +171,8 @@ func defaultConfig() config {
 		captureKeyboard:  true,
 		toggleHotkeyName: defaultToggleHotkeyName,
 		toggleHotkeyVK:   toggleVK,
+		toggleHotkeyMods: toggleMods,
+		autoSwitch:       true,
 		guiMode:          true,
 	}
 }
@@ -223,6 +227,7 @@ func parseConfig() (config, error) {
 	reconnect := flag.Duration("reconnect", defaultReconnectDelay, "Reconnect delay after serial failure")
 	keyboard := flag.Bool("keyboard", defaultCfg.captureKeyboard, "Capture and forward keyboard key down/up events")
 	toggle := flag.String("toggle", defaultToggle, "Hotkey to toggle remote mode (F1-F12)")
+	autoSwitch := flag.Bool("auto-switch", defaultCfg.autoSwitch, "Automatically jump to remote device when mouse moved to edge of screens")
 	gui := flag.Bool("gui", defaultCfg.guiMode, "Run with native Windows GUI")
 	flag.Parse()
 
@@ -232,7 +237,7 @@ func parseConfig() (config, error) {
 	if !ok {
 		return config{}, fmt.Errorf("invalid toggle hotkey %q (supported: F1-F12)", *toggle)
 	}
-	toggleVK, _ := toggleHotkeyNameToVK(normalizedToggle)
+	toggleVK, toggleMods := toggleHotkeyNameToVKMods(normalizedToggle)
 
 	normalizedHostSide, ok := normalizeHostSide(*hostSide)
 	if !ok {
@@ -260,6 +265,8 @@ func parseConfig() (config, error) {
 		captureKeyboard:  *keyboard,
 		toggleHotkeyName: normalizedToggle,
 		toggleHotkeyVK:   toggleVK,
+		toggleHotkeyMods: toggleMods,
+		autoSwitch:       *autoSwitch,
 		guiMode:          *gui,
 	}
 

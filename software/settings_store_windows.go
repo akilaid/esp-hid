@@ -32,6 +32,8 @@ type persistedSettings struct {
 	ReconnectDelayMs int     `json:"reconnectDelayMs"`
 	CaptureKeyboard  bool    `json:"captureKeyboard"`
 	ToggleHotkeyName string  `json:"toggleHotkeyName"`
+	ToggleHotkeyMods uint32  `json:"toggleHotkeyMods"`
+	AutoSwitch       bool    `json:"autoSwitch"`
 	GUIMode          bool    `json:"guiMode"`
 }
 
@@ -93,6 +95,7 @@ func loadSettingsConfig(defaults config) (config, error) {
 	cfg.adaptiveMoves = persisted.AdaptiveMoves
 	cfg.leftwardReturn = persisted.LeftwardReturn
 	cfg.captureKeyboard = persisted.CaptureKeyboard
+	cfg.autoSwitch = persisted.AutoSwitch
 	cfg.guiMode = persisted.GUIMode
 
 	if persisted.SlaveWidth >= minSlaveResolutionAxis &&
@@ -109,7 +112,9 @@ func loadSettingsConfig(defaults config) (config, error) {
 
 	if normalizedToggle, ok := normalizeToggleHotkeyName(persisted.ToggleHotkeyName); ok {
 		cfg.toggleHotkeyName = normalizedToggle
-		cfg.toggleHotkeyVK, _ = toggleHotkeyNameToVK(normalizedToggle)
+		vk, mods := toggleHotkeyNameToVKMods(normalizedToggle)
+		cfg.toggleHotkeyVK = vk
+		cfg.toggleHotkeyMods = mods
 	}
 
 	if cfg.autoPort {
@@ -145,6 +150,8 @@ func saveSettingsConfig(cfg config) error {
 		ReconnectDelayMs: int(cfg.reconnectDelay / time.Millisecond),
 		CaptureKeyboard:  cfg.captureKeyboard,
 		ToggleHotkeyName: cfg.toggleHotkeyName,
+		ToggleHotkeyMods: cfg.toggleHotkeyMods,
+		AutoSwitch:       cfg.autoSwitch,
 		GUIMode:          cfg.guiMode,
 	}
 

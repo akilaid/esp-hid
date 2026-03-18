@@ -9,7 +9,8 @@ ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 ov
 - GUI mode (default) with system tray behavior.
 - CLI mode for terminal-only workflows.
 - Auto serial reconnect and safety key/button release.
-- Remote mode toggle hotkey (default F9), gated by serial connection health.
+- Remote mode toggle hotkey (configurable combo, e.g. `Alt+F7`), gated by serial connection health.
+- Dual switching modes: **Auto** (edge-based) and **Manual** (hotkey-only).
 
 ## Repository Layout
 
@@ -43,9 +44,9 @@ ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 ov
 
 1. Open `firmware/firmware.ino` in Arduino IDE.
 2. Select your ESP32 board and COM port.
-3. Ensure BLE Combo library is available.
-	 - The repo already includes a local copy under `firmware/libraries/ESP32-BLE-Combo/`.
-	 - The bundled `ESP32-BLE-Combo` copy is already patched for the latest ESP32 `3.x.x`.
+3. Ensure the `ESP32-BLE-Combo` library is available in your Arduino `libraries` folder.
+	 - **IMPORTANT**: This repository bundles a specific version of `ESP32-BLE-Combo` that is already patched to support ESP32 Core `3.x.x`.
+	 - **Recommended Method**: Create a shortcut or symbolic link (symlink) from `firmware/libraries/ESP32-BLE-Combo/` to your local Arduino `libraries` folder (usually located in `Documents/Arduino/libraries` in Windows). This ensures you use the patched version while keeping it synchronized with the repo.
 4. Build and upload.
 
 Default firmware values:
@@ -118,12 +119,14 @@ Bridge status in GUI:
 
 ## Remote Mode Behavior
 
-- Remote mode can be activated by:
-	- moving cursor to the host-side boundary (right edge when `-host-side=left`, left edge when `-host-side=right`, etc.), or
-	- pressing toggle hotkey (default `F9`, configurable `F1`-`F12`).
+- Remote mode can be switched between two behaviors in the GUI:
+	- **Auto (Switch at edge of screens)**: Activates when moving cursor to the host-side boundary.
+	- **Manual (Hotkey toggle only)**: Only activates when the configured hotkey combo is pressed.
+- Hotkey can be any key or combination (e.g. `Ctrl+Alt+S`, `F9`, `Num +`).
+- The GUI includes a **Record** button to easily assign new hotkeys by pressing them.
 - Host return always works via the toggle hotkey.
-- Edge-aware return can be configured with slave resolution and host-side placement settings (GUI drag layout selector or CLI flags). With these set, return to host happens only when you push against the configured host-side edge of the virtual slave surface.
-- Optional left-swipe return can also be enabled (`-leftreturn=true`) as a fallback gesture.
+- Edge-aware return (in Auto mode) can be configured with slave resolution and host-side placement settings.
+- Optional left-swipe return can also be enabled (`-leftreturn=true`).
 - Toggle hotkey only works when serial connection is healthy.
 - If serial drops while remote mode is active, remote mode is disabled and release commands are sent.
 
@@ -148,7 +151,8 @@ All flags apply to both GUI and CLI modes:
 - `-leftreturn`: allow host return by deliberate quick left-swipe in remote mode (default `false`).
 - `-reconnect`: reconnect delay after serial failure (default `750ms`).
 - `-keyboard`: forward keyboard events (default `true`).
-- `-toggle`: remote mode hotkey (`F1`-`F12`, default `F9`).
+- `-toggle`: remote mode hotkey combo (default `F9`).
+- `-auto-switch`: automatically jump to remote device when mouse moved to edge of screens (default `true`).
 - `-gui`: launch native GUI (`true`) or CLI (`false`).
 
 ## Serial Protocol
