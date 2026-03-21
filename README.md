@@ -14,7 +14,7 @@ ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 ov
 
 ## Demo
 
-[![esp-hid bridge demo](esp-hid-bridge.gif)](https://youtu.be/TuCsHALIvrs)
+[![esp-hid bridge demo](assets/esp-hid-bridge.gif)](https://youtu.be/TuCsHALIvrs)
 
 ## Repository Layout
 
