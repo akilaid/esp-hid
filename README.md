@@ -12,6 +12,10 @@ ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 ov
 - Remote mode toggle hotkey (configurable combo, e.g. `Alt+F7`), gated by serial connection health.
 - Dual switching modes: **Auto** (edge-based) and **Manual** (hotkey-only).
 
+## Demo
+
+[![esp-hid bridge demo](esp-hid-bridge.gif)](https://youtu.be/TuCsHALIvrs)
+
 ## Repository Layout
 
 - `firmware/`: Arduino sketch and serial command parser for ESP32.
