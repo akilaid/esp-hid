@@ -153,7 +153,7 @@ func defaultConfig() config {
 	return config{
 		portName:         "auto",
 		autoPort:         true,
-		baudRate:         115200,
+		baudRate:         460800,
 		moveRateHz:       45,
 		moveDeadzone:     1,
 		moveSmoothing:    0.2,

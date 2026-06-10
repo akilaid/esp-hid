@@ -75,10 +75,10 @@ Modules under `namespace bridge`, each a `.h`/`.cpp` pair compiled by Arduino as
 - `serial_processor.cpp` — byte-at-a-time line assembler with a fixed 96-byte buffer; oversized lines are dropped until the next `\n` to resync (never blocks/desyncs).
 - `command_dispatch.cpp` — splits a line into command+args and dispatches. All actions no-op unless `Keyboard.isConnected()`. Mouse deltas larger than int8 are chunked into ±127 steps (`sendChunkedMove`) because HID reports are signed-byte deltas.
 - `connection_led.cpp` — built-in LED: solid when no BLE client, a 200 ms pulse every 20 s when connected.
-- `bridge_types.h` — shared constants (`kSerialBaud` 115200, `kMaxLineLength`, HID delta range).
+- `bridge_types.h` — shared constants (`kSerialBaud` 460800, `kMaxLineLength`, HID delta range).
 
 ## Conventions
 
 - Go: build constraints are load-bearing — keep `//go:build windows` on `software/` files and the `_darwin.go` suffix on macOS-only files, or cross-package builds break.
 - Firmware: keep everything in `namespace bridge`; per-command logic stays as small `executeXxx` helpers in `command_dispatch.cpp`.
-- Baud is hard-coded to `115200` on both ends (`bridge_types.h` and the `-baud` default) — changing one without the other breaks the link.
+- Baud is hard-coded to `460800` on both ends (`bridge_types.h` and the `-baud` default) — changing one without the other breaks the link.
