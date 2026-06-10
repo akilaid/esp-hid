@@ -1,6 +1,6 @@
 #include "command_dispatch.h"
 
-#include <BleCombo.h>
+#include "libraries/ESP32-BLE-Combo/BleCombo.h"
 
 namespace bridge {
 namespace {

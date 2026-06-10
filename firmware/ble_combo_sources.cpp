@@ -1,0 +1,5 @@
+#include "libraries/ESP32-BLE-Combo/BleCombo.cpp"
+#include "libraries/ESP32-BLE-Combo/BleComboKeyboard.cpp"
+#include "libraries/ESP32-BLE-Combo/BleComboMouse.cpp"
+#include "libraries/ESP32-BLE-Combo/BleConnectionStatus.cpp"
+#include "libraries/ESP32-BLE-Combo/KeyboardOutputCallbacks.cpp"

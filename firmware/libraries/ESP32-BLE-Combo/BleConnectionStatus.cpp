@@ -1,56 +1,25 @@
 #include "BleConnectionStatus.h"
 
-namespace {
-
-// BLE units: interval=1.25ms, timeout=10ms.
-constexpr uint16_t kPreferredConnMinInterval = 6;   // 7.5ms
-constexpr uint16_t kPreferredConnMaxInterval = 12;  // 15ms
-constexpr uint16_t kPreferredConnLatency = 0;
-constexpr uint16_t kPreferredConnTimeout = 200;     // 2s
-
-}  // namespace
-
 BleConnectionStatus::BleConnectionStatus(void) {
 }
 
-void BleConnectionStatus::onConnect(BLEServer* pServer)
+void BleConnectionStatus::onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo)
 {
   this->connected = true;
 
-  BLE2902* desc = (BLE2902*)this->inputKeyboard->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(true);
-  desc = (BLE2902*)this->inputMouse->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(true);
+  // Request a fast connection interval (7.5-15ms) so mouse/keyboard HID
+  // reports are delivered with low latency and movement feels smooth.
+  // Units: interval in 1.25ms steps, supervision timeout in 10ms steps.
+  pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 200);
 }
 
-#if defined(CONFIG_BLUEDROID_ENABLED)
-void BleConnectionStatus::onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param)
-{
-  if (pServer == nullptr || param == nullptr) {
-    return;
-  }
-
-  pServer->requestConnParams(param->connect.remote_bda,
-                             kPreferredConnMinInterval,
-                             kPreferredConnMaxInterval,
-                             kPreferredConnLatency,
-                             kPreferredConnTimeout);
-}
-#endif
-
-void BleConnectionStatus::onDisconnect(BLEServer* pServer)
-{
-  this->connected = false;
-  BLE2902* desc = (BLE2902*)this->inputKeyboard->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(false);
-  desc = (BLE2902*)this->inputMouse->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(false);  
-}
-
-#if defined(CONFIG_BLUEDROID_ENABLED)
-void BleConnectionStatus::onDisconnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param)
+void BleConnectionStatus::onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason)
 {
   (void)pServer;
-  (void)param;
+  (void)connInfo;
+  (void)reason;
+  this->connected = false;
+
+  // Resume advertising so the host can reconnect after a drop.
+  NimBLEDevice::startAdvertising();
 }
-#endif

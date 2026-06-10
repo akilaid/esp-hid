@@ -3,15 +3,13 @@
 #include "sdkconfig.h"
 #if defined(CONFIG_BT_ENABLED)
 
-#include <BLEServer.h>
-#include "BLE2902.h"
-#include "BLECharacteristic.h"
+#include <NimBLEDevice.h>
 
-class KeyboardOutputCallbacks : public BLECharacteristicCallbacks
+class KeyboardOutputCallbacks : public NimBLECharacteristicCallbacks
 {
 public:
   KeyboardOutputCallbacks(void);
-  void onWrite(BLECharacteristic* me);
+  void onWrite(NimBLECharacteristic* me, NimBLEConnInfo& connInfo) override;
 };
 
 #endif // CONFIG_BT_ENABLED
