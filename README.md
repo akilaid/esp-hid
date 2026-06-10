@@ -34,9 +34,10 @@ ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 ov
 
 ### Firmware Side
 
-- ESP32 development board.
+- ESP32 development board (classic ESP32, ESP32-S3, ESP32-C3, etc.).
 - Arduino IDE 2.x.
-- Espressif ESP32 board package.
+- Espressif ESP32 board package (core 3.x recommended).
+- `NimBLE-Arduino` library by h2zero (v2.x) — install via Arduino Library Manager. The bundled `ESP32-BLE-Combo` now runs on the NimBLE stack, which is required for reliable BLE-HID pairing on the newer RISC-V/S3 chips (the legacy Bluedroid stack crashes during BLE init on ESP32-C3/S3).
 
 ### Software Side
 
@@ -48,14 +49,15 @@ ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 ov
 
 1. Open `firmware/firmware.ino` in Arduino IDE.
 2. Select your ESP32 board and COM port.
-3. Ensure the `ESP32-BLE-Combo` library is available in your Arduino `libraries` folder.
+3. Install the `NimBLE-Arduino` library (h2zero, v2.x) from the Arduino Library Manager. The bundled `ESP32-BLE-Combo` depends on it.
+4. Ensure the `ESP32-BLE-Combo` library is available in your Arduino `libraries` folder.
 	 - **IMPORTANT**: This repository bundles a specific version of `ESP32-BLE-Combo` that is already patched to support ESP32 Core `3.x.x`.
 	 - **Recommended Method**: Create a shortcut or symbolic link (symlink) from `firmware/libraries/ESP32-BLE-Combo/` to your local Arduino `libraries` folder (usually located in `Documents/Arduino/libraries` in Windows). This ensures you use the patched version while keeping it synchronized with the repo.
 4. Build and upload.
 
 Default firmware values:
 
-- Serial baud: `460800`.
+- Serial baud: `115200`.
 - BLE device name: `PC Bridge Combo`.
 - BLE manufacturer: `ESP HID Bridge`.
 
@@ -144,7 +146,7 @@ Bridge status in GUI:
 All flags apply to both GUI and CLI modes:
 
 - `-port`: serial port or `auto` (default `auto`).
-- `-baud`: serial baud rate (default `460800`).
+- `-baud`: serial baud rate (default `115200`).
 - `-rate`: movement send rate Hz (default `45`).
 - `-deadzone`: ignore tiny move deltas up to this absolute value (default `1`, `0` disables).
 - `-smooth`: micro-smoothing factor for small movement (default `0.2`, range `[0, 1)`, `0` disables).

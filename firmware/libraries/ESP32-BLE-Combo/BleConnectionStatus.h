@@ -3,26 +3,19 @@
 #include "sdkconfig.h"
 #if defined(CONFIG_BT_ENABLED)
 
-#include <BLEServer.h>
-#include "BLE2902.h"
-#include "BLECharacteristic.h"
+#include <NimBLEDevice.h>
 
-class BleConnectionStatus : public BLEServerCallbacks
+class BleConnectionStatus : public NimBLEServerCallbacks
 {
 public:
   BleConnectionStatus(void);
   bool connected = false;
-  void onConnect(BLEServer* pServer);
-  void onDisconnect(BLEServer* pServer);
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override;
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override;
 
-#if defined(CONFIG_BLUEDROID_ENABLED)
-  void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param);
-  void onDisconnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param);
-#endif
-
-  BLECharacteristic* inputKeyboard;
-  BLECharacteristic* outputKeyboard;
-  BLECharacteristic* inputMouse;
+  NimBLECharacteristic* inputKeyboard;
+  NimBLECharacteristic* outputKeyboard;
+  NimBLECharacteristic* inputMouse;
 };
 
 #endif // CONFIG_BT_ENABLED

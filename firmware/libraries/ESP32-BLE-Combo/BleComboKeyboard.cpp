@@ -1,10 +1,6 @@
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
-#include "BLE2902.h"
-#include "BLEHIDDevice.h"
+#include <NimBLEDevice.h>
+#include <NimBLEHIDDevice.h>
 #include "HIDTypes.h"
-#include <driver/adc.h>
 #include "sdkconfig.h"
 
 #include "BleConnectionStatus.h"
@@ -24,6 +20,10 @@
 #define KEYBOARD_ID 0x01
 #define MEDIA_KEYS_ID 0x02
 #define MOUSE_ID 0x03
+
+// BLE "HID Keyboard" appearance (0x03C1). The Bluedroid HID_KEYBOARD constant
+// is unavailable under NimBLE, so define it explicitly.
+#define APPEARANCE_HID_KEYBOARD 0x03C1
 
 constexpr uint16_t kAdvertisedIntervalMin = 0x20;     // 20ms (BLE spec minimum advertising interval)
 constexpr uint16_t kAdvertisedIntervalMax = 0x40;     // 40ms
@@ -165,41 +165,39 @@ void BleComboKeyboard::setBatteryLevel(uint8_t level) {
 
 void BleComboKeyboard::taskServer(void* pvParameter) {
   BleComboKeyboard* bleKeyboardInstance = (BleComboKeyboard *) pvParameter; //static_cast<BleComboKeyboard *>(pvParameter);
-	BLEDevice::init(String(bleKeyboardInstance->deviceName.c_str()));
-  BLEServer *pServer = BLEDevice::createServer();
+	NimBLEDevice::init(bleKeyboardInstance->deviceName);
+
+  // Just Works pairing with Secure Connections + bonding. NimBLE performs the
+  // SMP negotiation that the legacy Bluedroid path crashed on for ESP32-C3/S3.
+  NimBLEDevice::setSecurityAuth(true, false, true);
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  NimBLEServer *pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(bleKeyboardInstance->connectionStatus);
 
-  bleKeyboardInstance->hid = new BLEHIDDevice(pServer);
-  bleKeyboardInstance->inputKeyboard = bleKeyboardInstance->hid->inputReport(KEYBOARD_ID); // <-- input REPORTID from report map
-  bleKeyboardInstance->outputKeyboard = bleKeyboardInstance->hid->outputReport(KEYBOARD_ID);
-  bleKeyboardInstance->inputMediaKeys = bleKeyboardInstance->hid->inputReport(MEDIA_KEYS_ID);
+  bleKeyboardInstance->hid = new NimBLEHIDDevice(pServer);
+  bleKeyboardInstance->inputKeyboard = bleKeyboardInstance->hid->getInputReport(KEYBOARD_ID);
+  bleKeyboardInstance->outputKeyboard = bleKeyboardInstance->hid->getOutputReport(KEYBOARD_ID);
+  bleKeyboardInstance->inputMediaKeys = bleKeyboardInstance->hid->getInputReport(MEDIA_KEYS_ID);
   bleKeyboardInstance->connectionStatus->inputKeyboard = bleKeyboardInstance->inputKeyboard;
   bleKeyboardInstance->connectionStatus->outputKeyboard = bleKeyboardInstance->outputKeyboard;
   
-  bleKeyboardInstance->inputMouse = bleKeyboardInstance->hid->inputReport(MOUSE_ID); // <-- input REPORTID from report map
+  bleKeyboardInstance->inputMouse = bleKeyboardInstance->hid->getInputReport(MOUSE_ID);
   bleKeyboardInstance->connectionStatus->inputMouse = bleKeyboardInstance->inputMouse;
  
   bleKeyboardInstance->outputKeyboard->setCallbacks(new KeyboardOutputCallbacks());
 
-	bleKeyboardInstance->hid->manufacturer()->setValue(String(bleKeyboardInstance->deviceManufacturer.c_str()));
+  bleKeyboardInstance->hid->setManufacturer(bleKeyboardInstance->deviceManufacturer);
 
-  bleKeyboardInstance->hid->pnp(0x02, 0xe502, 0xa111, 0x0210);
-  bleKeyboardInstance->hid->hidInfo(0x00,0x01);
+  bleKeyboardInstance->hid->setPnp(0x02, 0xe502, 0xa111, 0x0210);
+  bleKeyboardInstance->hid->setHidInfo(0x00, 0x01);
 
-  BLESecurity *pSecurity = new BLESecurity();
-
-  pSecurity->setAuthenticationMode(ESP_LE_AUTH_BOND);
-
-  bleKeyboardInstance->hid->reportMap((uint8_t*)_hidReportDescriptor, sizeof(_hidReportDescriptor));
+  bleKeyboardInstance->hid->setReportMap((uint8_t*)_hidReportDescriptor, sizeof(_hidReportDescriptor));
   bleKeyboardInstance->hid->startServices();
 
-  BLEAdvertising *pAdvertising = pServer->getAdvertising();
-  pAdvertising->setAppearance(HID_KEYBOARD);
-	pAdvertising->setMinInterval(kAdvertisedIntervalMin);
-	pAdvertising->setMaxInterval(kAdvertisedIntervalMax);
-	pAdvertising->setMinPreferred(kPreferredConnIntervalMin);
-	pAdvertising->setMaxPreferred(kPreferredConnIntervalMax);
-  pAdvertising->addServiceUUID(bleKeyboardInstance->hid->hidService()->getUUID());
+  NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->setAppearance(APPEARANCE_HID_KEYBOARD);
+  pAdvertising->addServiceUUID(bleKeyboardInstance->hid->getHidService()->getUUID());
+  pAdvertising->enableScanResponse(true);
   pAdvertising->start();
   bleKeyboardInstance->hid->setBatteryLevel(bleKeyboardInstance->batteryLevel);
 
