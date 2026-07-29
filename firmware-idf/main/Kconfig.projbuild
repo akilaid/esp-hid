@@ -1,0 +1,36 @@
+menu "ESP-HID Bridge"
+
+    config BRIDGE_DEVICE_NAME
+        string "BLE device name"
+        default "ESP-HID-ME"
+        help
+            Name the device advertises and exposes via GAP. This is the name
+            that appears in the phone's Bluetooth pairing list.
+
+    config BRIDGE_MANUFACTURER
+        string "Manufacturer string"
+        default "AKILA INDUNIL"
+
+    config BRIDGE_LED_GPIO
+        int "Status LED GPIO"
+        default 8
+        help
+            GPIO of the status LED. 8 is the built-in LED on the common
+            ESP32-C3 SuperMini board.
+
+    config BRIDGE_LED_ACTIVE_LOW
+        bool "LED is active low"
+        default y
+        help
+            The SuperMini built-in LED is wired active-low.
+
+    config BRIDGE_LOG_FRAMES
+        bool "Mirror ESP log lines into LOG protocol frames"
+        default n
+        help
+            Development aid: forwards each log line (truncated to 32 bytes)
+            over the binary protocol as LOG frames, so the hidctl.py test tool
+            can show device logs without a UART dongle on GPIO20/21. Logs
+            still go to UART0 as well.
+
+endmenu

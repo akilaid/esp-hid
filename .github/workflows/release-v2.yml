@@ -1,0 +1,128 @@
+name: Build and Release v2 (host + firmware-idf)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-v2-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+          cache-dependency-path: host/go.sum
+      - name: Vet and test (platform-independent packages)
+        working-directory: host
+        run: |
+          go vet ./...
+          go test ./... -count=1
+      - name: Cross-compile Windows binary (compile check)
+        working-directory: host
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go build ./...
+
+  build-windows:
+    runs-on: windows-latest
+    needs: test
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+          cache-dependency-path: host/go.sum
+      - name: Prepare release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $latest = git tag --list "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | Select-Object -First 1
+          if (-not $latest) {
+            $nextTag = "v2.0.0"
+          } else {
+            if ($latest -notmatch '^v(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$') {
+              throw "Unexpected latest tag format: $latest"
+            }
+            if ([int]$Matches.major -lt 2) {
+              # v1.x tags belong to the legacy Arduino-era app.
+              $nextTag = "v2.0.0"
+            } else {
+              $patch = [int]$Matches.patch + 1
+              $nextTag = "v$($Matches.major).$($Matches.minor).$patch"
+            }
+          }
+          "tag=$nextTag" >> $env:GITHUB_OUTPUT
+          "name=Release $nextTag" >> $env:GITHUB_OUTPUT
+      - name: Build
+        shell: pwsh
+        working-directory: host
+        run: ./build-production.ps1 -Output esp-hid-bridge.exe -Version ${{ steps.meta.outputs.tag }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: host/esp-hid-bridge.exe
+          if-no-files-found: error
+
+  build-firmware:
+    runs-on: ubuntu-latest
+    needs: test
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build firmware (ESP-IDF, esp32c3)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0
+          target: esp32c3
+          path: firmware-idf
+      - name: Package firmware images
+        run: |
+          mkdir -p firmware-out
+          cp firmware-idf/build/esp_hid_bridge.bin firmware-out/
+          cp firmware-idf/build/bootloader/bootloader.bin firmware-out/
+          cp firmware-idf/build/partition_table/partition-table.bin firmware-out/
+          cp firmware-idf/build/flash_args firmware-out/ 2>/dev/null || true
+          cp firmware-idf/build/flasher_args.json firmware-out/ 2>/dev/null || true
+          cd firmware-out && zip -r ../firmware-esp32c3.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32c3
+          path: firmware-esp32c3.zip
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-firmware]
+    # Release even if the firmware build failed — the exe is the must-have.
+    if: ${{ always() && needs.build-windows.result == 'success' }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build-windows.outputs.tag }}
+          name: ${{ needs.build-windows.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            artifacts/esp-hid-bridge.exe
+            artifacts/firmware-esp32c3.zip

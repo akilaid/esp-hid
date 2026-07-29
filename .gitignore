@@ -4,3 +4,8 @@
 software/rsrc_windows_*.syso
 /firmware/out
 /firmware/build
+host/cmd/bridge/rsrc_windows_*.syso
+/firmware-idf/build
+/firmware-idf/sdkconfig
+/firmware-idf/sdkconfig.old
+/firmware-idf/tools/.venv
