@@ -19,7 +19,8 @@ if (-not (Test-Path $rsrcExe)) {
 }
 
 # Icons become resources 1 (app) and 2 (remote-mode) — the IDs the GUI loads.
-& $rsrcExe -arch $goArch -ico "app.ico,on.ico" -o "cmd/bridge/rsrc_windows_$goArch.syso"
+# The manifest declares the Common Controls 6 dependency walk requires.
+& $rsrcExe -arch $goArch -manifest app.manifest -ico "app.ico,on.ico" -o "cmd/bridge/rsrc_windows_$goArch.syso"
 
 go build -trimpath -ldflags "-H=windowsgui -s -w -X main.version=$Version" -o $Output ./cmd/bridge
 

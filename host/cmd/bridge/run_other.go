@@ -3,7 +3,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
 
 	"esp-hid/host/internal/config"
 )
@@ -15,4 +17,8 @@ func run(cfg config.Config) error {
 		log.Print("capture/GUI are Windows-only for now; running CLI mode")
 	}
 	return runCLI(cfg)
+}
+
+func reportFatal(err error) {
+	fmt.Fprintln(os.Stderr, err)
 }
