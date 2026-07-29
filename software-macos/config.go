@@ -321,36 +321,58 @@ func startupPortHint(cfg config) {
 	}
 }
 
-// macOSPortPriority returns how likely a port name is an ESP32 USB serial adapter.
-// Higher is more likely.
+// macOSPortPriority returns how likely a port name is an ESP32 USB serial
+// adapter. Higher is more likely; a negative score means "never auto-select".
+//
+// Three rules matter on macOS:
+//   - Only USB devices are candidates. Every Mac exposes serial ports that are
+//     never an ESP32 (/dev/cu.Bluetooth-Incoming-Port, /dev/cu.debug-console,
+//     paired Bluetooth audio); connecting to one is always wrong, so they are
+//     rejected outright rather than merely ranked low.
+//   - /dev/cu.* beats the matching /dev/tty.*. Opening a tty.* device blocks
+//     until DCD is asserted, which never happens on a USB serial adapter.
+//   - Native USB ranks alongside bridge chips. ESP32-C3/S3 boards expose a
+//     USB Serial/JTAG peripheral that enumerates as usbmodem*, so it must not
+//     lose to a CP210x/CH34x bridge belonging to some other board.
 func macOSPortPriority(port string) int {
 	lower := strings.ToLower(port)
-	switch {
-	case strings.Contains(lower, "usbserial"):
-		return 4
-	case strings.Contains(lower, "slab_usbtouart") || strings.Contains(lower, "slabusbtouart"):
-		return 4
-	case strings.Contains(lower, "usbmodem"):
-		return 3
-	case strings.Contains(lower, "wchusbserial"):
-		return 3
-	case strings.Contains(lower, "ch340") || strings.Contains(lower, "ch341"):
-		return 3
-	case strings.HasPrefix(lower, "/dev/tty."):
-		return 1
-	case strings.HasPrefix(lower, "/dev/cu."):
-		return 0
-	default:
+
+	isCallout := strings.HasPrefix(lower, "/dev/cu.")
+	isTTY := strings.HasPrefix(lower, "/dev/tty.")
+	if !isCallout && !isTTY {
 		return -1
 	}
-}
 
-func listSerialPorts() ([]string, error) {
-	ports, err := serial.GetPortsList()
-	if err != nil {
-		return nil, err
+	// Every USB serial adapter macOS enumerates carries "usb" in its device
+	// name: usbserial-*, usbmodem*, wchusbserial*, SLAB_USBtoUART. Anything
+	// else is a built-in or Bluetooth port.
+	if !strings.Contains(lower, "usb") {
+		return -1
 	}
 
+	score := 2
+	switch {
+	case strings.Contains(lower, "usbserial"),
+		strings.Contains(lower, "usbmodem"),
+		strings.Contains(lower, "wchusbserial"),
+		strings.Contains(lower, "slab_usbtouart"),
+		strings.Contains(lower, "slabusbtouart"),
+		strings.Contains(lower, "ch340"),
+		strings.Contains(lower, "ch341"):
+		score = 4
+	}
+
+	// Prefer the callout device over its tty twin.
+	if isTTY {
+		score--
+	}
+
+	return score
+}
+
+// sortPortsByPriority orders ports best-candidate-first, breaking ties by name
+// so the result is stable across runs.
+func sortPortsByPriority(ports []string) {
 	sort.Slice(ports, func(i, j int) bool {
 		pi := macOSPortPriority(ports[i])
 		pj := macOSPortPriority(ports[j])
@@ -359,6 +381,15 @@ func listSerialPorts() ([]string, error) {
 		}
 		return ports[i] < ports[j]
 	})
+}
+
+func listSerialPorts() ([]string, error) {
+	ports, err := serial.GetPortsList()
+	if err != nil {
+		return nil, err
+	}
+
+	sortPortsByPriority(ports)
 
 	return ports, nil
 }
@@ -379,6 +410,35 @@ func autoSelectPort() (string, error) {
 		return "", errors.New("no serial ports available")
 	}
 
-	// Pick highest-priority port (listSerialPorts sorts by priority descending)
+	// Pick highest-priority port (listSerialPorts sorts by priority descending).
+	// Reject it if it is not plausibly a USB serial adapter: silently opening
+	// the built-in Bluetooth port looks like a successful connection and then
+	// swallows every command, which is far harder to diagnose than an error.
+	best := macOSPortPriority(ports[0])
+	if best < 0 {
+		return "", fmt.Errorf("no USB serial port found (available: %s)", portsToString(ports))
+	}
+
+	// Several USB adapters can tie for best: a native-USB ESP32-C3/S3 and an
+	// unrelated CP210x bridge are equally plausible, and nothing in the port
+	// name settles it. Pick deterministically but say so, because the failure
+	// mode otherwise is a silent connection to the wrong board.
+	if tied := equalPriorityPorts(ports, best); len(tied) > 1 {
+		log.Printf("serial auto-detect: %d equally likely ports (%s); using %s — pass -port to choose explicitly",
+			len(tied), portsToString(tied), ports[0])
+	}
+
 	return ports[0], nil
+}
+
+// equalPriorityPorts returns the ports sharing the given priority, ignoring the
+// tty.* twin of a cu.* device (it always scores lower, so it never ties).
+func equalPriorityPorts(ports []string, priority int) []string {
+	var tied []string
+	for _, port := range ports {
+		if macOSPortPriority(port) == priority {
+			tied = append(tied, port)
+		}
+	}
+	return tied
 }
