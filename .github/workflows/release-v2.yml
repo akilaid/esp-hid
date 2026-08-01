@@ -112,17 +112,17 @@ jobs:
       - name: Build universal .app
         working-directory: host
         run: ./build-macos.sh ${{ needs.meta.outputs.tag }}
-      # ditto, not zip: a plain zip drops symlinks and extended attributes and
-      # breaks the bundle's code signature, producing an app macOS refuses to
-      # open.
-      - name: Package bundle
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            "host/dist/ESP HID Bridge.app" esp-hid-bridge-macos.zip
+      # The .dmg is the shipped artifact: it opens to a window with the app
+      # and an Applications shortcut, so installing is a drag. The Finder
+      # styling step inside is best-effort — on a headless runner the image
+      # still works, it just looks plainer.
+      - name: Build disk image
+        working-directory: host
+        run: ./build-dmg.sh ${{ needs.meta.outputs.tag }}
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-app
-          path: esp-hid-bridge-macos.zip
+          name: macos-dmg
+          path: host/dist/ESP-HID-Bridge-*.dmg
           if-no-files-found: error
 
   build-firmware:
@@ -176,5 +176,5 @@ jobs:
           fail_on_unmatched_files: false
           files: |
             artifacts/esp-hid-bridge.exe
-            artifacts/esp-hid-bridge-macos.zip
+            artifacts/ESP-HID-Bridge-*.dmg
             artifacts/firmware-esp32c3.zip

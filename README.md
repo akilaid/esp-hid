@@ -56,8 +56,11 @@ Changing a message means changing all of them.
 1. **Flash the firmware** — see [`firmware-idf/README.md`](firmware-idf/README.md).
 2. **Pair your phone** with the Bluetooth device `ESP-HID-ME`.
 3. **Connect the ESP32-C3 to your computer** over USB.
-4. **Run the sender** — see [`host/README.md`](host/README.md) for builds,
-   downloads, and (on macOS) the permissions it needs.
+4. **Run the sender.** On macOS, open `ESP-HID-Bridge-<version>.dmg` from
+   [Releases](https://github.com/akilaid/esp-hid/releases) and drag the app
+   into Applications; on Windows, download `esp-hid-bridge.exe`. See
+   [`host/README.md`](host/README.md) for building from source and, on
+   macOS, the permissions and Gatekeeper steps the first launch needs.
 5. Press the toggle hotkey (`F9` by default), or push the cursor into the
    screen edge, and your input goes to the phone. Press it again to come
    back.
