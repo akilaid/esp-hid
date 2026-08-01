@@ -33,8 +33,9 @@ The project has two generations. **v2 is the current one.**
 
 The two generations speak different wire protocols and are not
 interchangeable: a v1 app cannot drive v2 firmware or vice versa. The v1
-tree is kept only for boards still running the Arduino sketch. The retired v1
-macOS app (`software-macos/`) has been removed — `host/` replaces it.
+tree is kept only for boards still running the Arduino sketch, and is no
+longer released — build it by hand if you need it. The retired v1 macOS app
+(`software-macos/`) has been removed entirely; `host/` replaces it.
 
 The contract that holds v2 together is the **binary wire protocol**, specified
 in [`firmware-idf/docs/PROTOCOL.md`](firmware-idf/docs/PROTOCOL.md) and

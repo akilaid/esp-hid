@@ -73,9 +73,11 @@ There is no darwin cross-compile check — the macOS layers need the macOS SDK,
 so the `build-macos` CI job is what type-checks them.
 
 `.github/workflows/release-v2.yml` (workflow_dispatch) computes the next tag
-in a `meta` job, then builds Windows, macOS, and firmware in parallel.
-`release-main.yml` is the legacy v1 pipeline and shares the same tag
-namespace — be careful running it.
+in a `meta` job, then builds Windows, macOS, and firmware in parallel. It is
+the only release pipeline: the legacy `release-main.yml` was deleted because
+it built the v1 app from the *same* tag namespace, so running it would have
+published a v1 binary under the next `v2.x` tag. The v1 source under
+`firmware/` and `software/` is still there and still buildable by hand.
 
 ## Host architecture
 
