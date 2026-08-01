@@ -1,16 +1,16 @@
 //go:build windows
 
-// Package ui is the walk-based Windows GUI: connection + BLE status, input
-// settings, and device maintenance (bond clearing). Adapted from the legacy
+// The walk-based Windows GUI: connection + BLE status, input settings, and
+// device maintenance (bond clearing). Adapted from the legacy
 // software/gui_windows.go, with a BLE status line fed by device reports —
-// the diagnostic the old system never had.
+// the diagnostic the old system never had. Form validation and status
+// wording are shared with the macOS GUI in form.go.
 package ui
 
 import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 
 	"github.com/lxn/walk"
 	//lint:ignore ST1001 walk's declarative DSL is designed for dot import
@@ -18,21 +18,12 @@ import (
 
 	"esp-hid/host/internal/bridge"
 	"esp-hid/host/internal/config"
-	"esp-hid/host/internal/hotkey"
-	"esp-hid/host/internal/protocol"
 )
 
 const (
 	iconResourceIDApp        = 1
 	iconResourceIDRemoteMode = 2
 )
-
-var slaveResolutionChoices = []string{
-	"1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3840x2160",
-	"720x1280", "768x1366", "900x1600", "1080x1920", "1440x2560", "2160x3840",
-}
-
-var hostSideChoices = []string{"left", "right", "top", "bottom"}
 
 type gui struct {
 	cfg     config.Config
@@ -94,9 +85,9 @@ func Run(cfg config.Config) error {
 }
 
 func (app *gui) build() error {
-	sideIndex := indexOf(hostSideChoices, app.cfg.HostSide)
+	sideIndex := IndexOf(HostSideChoices, app.cfg.HostSide)
 	resValue := fmt.Sprintf("%dx%d", app.cfg.SlaveWidth, app.cfg.SlaveHeight)
-	resIndex := indexOf(slaveResolutionChoices, resValue)
+	resIndex := IndexOf(SlaveResolutionChoices, resValue)
 
 	window := MainWindow{
 		AssignTo: &app.mw,
@@ -159,13 +150,13 @@ func (app *gui) build() error {
 					ComboBox{
 						AssignTo:     &app.resCombo,
 						Editable:     true,
-						Model:        slaveResolutionChoices,
+						Model:        SlaveResolutionChoices,
 						CurrentIndex: resIndex,
 					},
 					Label{Text: "This PC sits:"},
 					ComboBox{
 						AssignTo:     &app.sideCombo,
-						Model:        hostSideChoices,
+						Model:        HostSideChoices,
 						CurrentIndex: sideIndex,
 					},
 				},
@@ -234,31 +225,15 @@ func (app *gui) setupTray() {
 }
 
 func (app *gui) readConfigFromForm() error {
-	combo, ok := hotkey.Normalize(strings.TrimSpace(app.hotkeyEdit.Text()))
-	if !ok {
-		return fmt.Errorf("invalid hotkey %q (examples: F9, Ctrl+Alt+F7)", app.hotkeyEdit.Text())
+	values := FormValues{
+		ToggleHotkey:    app.hotkeyEdit.Text(),
+		MoveRateHz:      app.rateEdit.Text(),
+		Resolution:      app.resCombo.Text(),
+		HostSideIndex:   app.sideCombo.CurrentIndex(),
+		CaptureKeyboard: app.keyboardCheck.Checked(),
+		AutoSwitch:      app.autoRadio.Checked(),
 	}
-	app.cfg.ToggleHotkey = combo
-
-	rate, err := strconv.Atoi(strings.TrimSpace(app.rateEdit.Text()))
-	if err != nil || rate <= 0 || rate > 500 {
-		return fmt.Errorf("send rate must be a number between 1 and 500")
-	}
-	app.cfg.MoveRateHz = rate
-
-	width, height, err := config.ParseResolution(app.resCombo.Text())
-	if err != nil {
-		return err
-	}
-	app.cfg.SlaveWidth = width
-	app.cfg.SlaveHeight = height
-
-	if index := app.sideCombo.CurrentIndex(); index >= 0 && index < len(hostSideChoices) {
-		app.cfg.HostSide = hostSideChoices[index]
-	}
-	app.cfg.CaptureKeyboard = app.keyboardCheck.Checked()
-	app.cfg.AutoSwitch = app.autoRadio.Checked()
-	return app.cfg.Validate()
+	return values.Apply(&app.cfg)
 }
 
 func (app *gui) startBridge() {
@@ -333,11 +308,9 @@ func (app *gui) applyEvent(event bridge.Event) {
 		app.portLabel.SetText("-")
 		app.bleLabel.SetText("-")
 	case bridge.EventHello:
-		hello := event.Hello
-		app.fwLabel.SetText(fmt.Sprintf("%d.%d.%d (protocol v%d)",
-			hello.FwMajor, hello.FwMinor, hello.FwPatch, hello.ProtoVersion))
+		app.fwLabel.SetText(FirmwareText(event.Hello))
 	case bridge.EventBleState:
-		app.bleLabel.SetText(bleStateText(event.BleState))
+		app.bleLabel.SetText(BleStateText(event.BleState))
 	case bridge.EventDeviceError:
 		log.Printf("device error: %s", event.Detail)
 	case bridge.EventRemoteMode:
@@ -360,29 +333,4 @@ func (app *gui) applyEvent(event bridge.Event) {
 	case bridge.EventLog:
 		log.Printf("device: %s", event.Detail)
 	}
-}
-
-func bleStateText(state protocol.BleState) string {
-	switch state.State {
-	case protocol.BleConnected:
-		return fmt.Sprintf("Connected (%d paired)", state.BondCount)
-	case protocol.BleAdvertising:
-		if state.BondCount == 0 {
-			return "Advertising — pair the phone with \"ESP-HID-ME\""
-		}
-		return fmt.Sprintf("Advertising — waiting for phone (%d paired)", state.BondCount)
-	case protocol.BleIdle:
-		return "Bluetooth starting…"
-	default:
-		return "Unknown"
-	}
-}
-
-func indexOf(values []string, value string) int {
-	for i, v := range values {
-		if strings.EqualFold(v, value) {
-			return i
-		}
-	}
-	return -1
 }

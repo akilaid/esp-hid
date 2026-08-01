@@ -44,6 +44,11 @@ const (
 	VKDivide   = 0x6F
 	VKF1       = 0x70
 	VKF12      = 0x7B
+	// Windows lays F1..F24 out contiguously from 0x70, so VKF1+n addresses
+	// any of them. The grammar stops at F20 because that is the highest
+	// function key a Mac keyboard has, which keeps every bindable combo
+	// usable on both platforms.
+	VKF20      = 0x83
 	VKShift    = 0x10
 	VKControl  = 0x11
 	VKMenu     = 0x12
@@ -146,7 +151,7 @@ func modsPrefix(mods uint32) string {
 
 func vkToName(vk uint32) (string, bool) {
 	switch {
-	case vk >= VKF1 && vk <= VKF12:
+	case vk >= VKF1 && vk <= VKF20:
 		return fmt.Sprintf("F%d", vk-VKF1+1), true
 	case vk >= VKA && vk <= VKZ:
 		return string(rune('A' + vk - VKA)), true
@@ -215,7 +220,7 @@ func nameToVK(name string) uint32 {
 	}
 	if strings.HasPrefix(upper, "F") && len(upper) >= 2 && len(upper) <= 3 {
 		var n int
-		if _, err := fmt.Sscanf(upper, "F%d", &n); err == nil && n >= 1 && n <= 12 {
+		if _, err := fmt.Sscanf(upper, "F%d", &n); err == nil && n >= 1 && n <= 20 {
 			return VKF1 + uint32(n-1)
 		}
 	}

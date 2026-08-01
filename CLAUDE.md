@@ -4,81 +4,155 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A three-part bridge that forwards a PC's mouse/keyboard to an ESP32 over USB serial; the ESP32 re-emits the input as Bluetooth LE HID (combined mouse + keyboard) to a paired phone/tablet. The PC acts as "host", the BLE target as the "slave".
+A bridge that forwards a PC's mouse/keyboard to an ESP32 over USB; the ESP32
+re-emits the input as Bluetooth LE HID (combined mouse + keyboard) to a paired
+phone/tablet. The PC is the "host", the BLE target is the "slave".
 
-The whole system is held together by one contract: the **serial protocol** (newline-delimited UTF-8 text commands). The Go sender produces these strings; the firmware parses and replays them as HID reports. Changing a command name, argument format, or adding a command requires edits on *both* sides (`software*/serial_writer.go` + `software*/events.go` enqueue side, and `firmware/command_dispatch.cpp` dispatch side). The canonical command list lives in README.md ("Serial Protocol") and `firmware/command_dispatch.cpp`.
+**The repo holds two generations. v2 is the live one; work there unless
+explicitly asked otherwise.**
 
-## Three components
+| Path | Generation | Role |
+|---|---|---|
+| `firmware-idf/` | **v2** | ESP-IDF v6.0, ESP32-C3, NimBLE via `esp_hid`. |
+| `host/` | **v2** | Go sender, Windows + macOS, single module `esp-hid/host`. |
+| `firmware/` | v1 | Arduino sketch, `ESP32-BLE-Combo` on NimBLE. Superseded. |
+| `software/` | v1 | Go Windows sender, module `esp-hid/software`. Superseded. |
 
-- `firmware/` — ESP32 Arduino sketch (C++). Entry point `firmware.ino`.
-- `software/` — Windows sender (Go). Every `.go` file is `//go:build windows`.
-- `software-macos/` — macOS sender (Go, Fyne GUI + CGo). Platform code uses the `_darwin.go` filename suffix.
+The two generations speak different wire protocols and cannot interoperate.
+The v1 tree is kept only for boards still running the Arduino sketch; do not
+port v2 changes into it.
 
-The two senders are independent Go modules (`esp-hid/software`, `esp-hid/software-macos`) that re-implement the same pipeline against different OS input APIs. They share concepts and the serial protocol, **not** code — a change to capture/remote-mode logic usually needs to be mirrored in both.
+## The contract
+
+v2 is held together by the **binary wire protocol** in
+`firmware-idf/docs/PROTOCOL.md`: framed as
+`0xAA 0x55 | type | len | payload | crc8`, CRC-8 poly `0x07` over
+`type|len|payload`, little-endian payloads, max 32-byte payload.
+
+It has **three hand-maintained implementations**, and a change to any message
+means changing all of them plus the doc:
+
+- `firmware-idf/main/protocol.c` (+ `protocol.h`)
+- `host/internal/protocol/protocol.go`
+- `firmware-idf/tools/hidctl.py`
+
+They are kept honest by `firmware-idf/tools/test_protocol.c` and
+`host/internal/protocol/protocol_test.go`, both asserting the test vectors in
+PROTOCOL.md.
+
+Transport facts that shape the design: the C3's native USB Serial/JTAG port
+(VID/PID `303A:1001`) ignores baud, and **opening the port does not reset the
+chip**, so device state survives host reconnects — the host must send
+`RELEASE_ALL` + `GET_STATUS` on connect. Firmware logs go to UART0 unless
+`CONFIG_BRIDGE_LOG_FRAMES=y` mirrors them into protocol `LOG` frames.
 
 ## Build / flash / run
 
-### Firmware (from `firmware/`)
-```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32 --libraries libraries --output-dir out .
-arduino-cli upload -p COM9 -b esp32:esp32:esp32 --input-dir out -t   # replace COM9
-```
-`ble_combo_sources.cpp` `#include`s the bundled library's `.cpp` files directly, so the sketch compiles the patched `ESP32-BLE-Combo` (in `firmware/libraries/`) without it being installed in the Arduino `libraries` folder. The README's symlink instructions are the older alternative; the in-tree include is self-contained. The library copy is patched for ESP32 Core 3.x.x — do not replace it with the upstream version.
-
-The bundled `ESP32-BLE-Combo` runs on the **NimBLE** stack (`NimBLE-Arduino` by h2zero, v2.x, installed via Library Manager — a hard dependency). It was ported from Bluedroid because the legacy Bluedroid BLE-HID path crashes during BLE init (`Guru Meditation / Load access fault`) on the newer ESP32-C3/S3 controllers. `press()`/`release()`/`_asciimap` keep the T-vK BleKeyboard key-code convention (ASCII for printables, `0x80+` for modifiers/specials) — this is the contract `software*/keymap.go` `vkToBleKeyCode` encodes, so changing it breaks keyboard input.
-
-### Windows sender (from `software/`)
-```powershell
-go mod tidy
-.\build-production.ps1                 # GUI build: embeds icons, -H=windowsgui (no console)
-go build -o dev.exe .                  # plain build: console subsystem, useful for logs
-.\esp-hid-bridge.exe                   # GUI (default)
-.\esp-hid-bridge.exe -gui=false -port auto   # CLI
-```
-Live reload during dev: `air -c .air.toml`.
-
-### macOS sender (from `software-macos/`)
+### Firmware (from `firmware-idf/`)
 ```bash
-go mod tidy
-./build-production.sh                  # builds; packages a .app if the fyne CLI is installed
+get_idf                     # or: . $IDF_PATH/export.sh
+idf.py set-target esp32c3   # first time only
+idf.py build
+idf.py -p /dev/cu.usbmodem* flash
 ```
-Needs Xcode Command Line Tools (CGo, required by Fyne).
+Test without the GUI app: `tools/hidctl.py status` (needs a venv at
+`tools/.venv` with pyserial).
 
-There is no test suite. `.github/workflows/release-main.yml` is `workflow_dispatch`-only: it runs `build-production.ps1`, auto-increments the latest `vMAJOR.MINOR.PATCH` tag, and publishes the Windows EXE as a GitHub release.
+### Host (from `host/`)
+```bash
+# Windows
+./build-production.ps1              # GUI exe with embedded icons
 
-## Go sender architecture (data flow)
+# macOS (needs Xcode Command Line Tools; capture and GUI are cgo)
+./build-macos.sh                    # universal .app in dist/
 
-This is the part that needs multiple files to understand. Pipeline, per run:
+go vet ./... && go test ./...
+GOOS=windows GOARCH=amd64 go build ./...   # cross-compile check
+```
+There is no darwin cross-compile check — the macOS layers need the macOS SDK,
+so the `build-macos` CI job is what type-checks them.
 
-1. **OS input hooks** (`hooks_windows.go` `runInputHooks` / `hooks_darwin.go`) run on a locked OS thread and own the low-level keyboard/mouse hook. The callback hosts the entire **remote-mode state machine** (see below) and emits semantic `inputEvent`s into a channel. When remote mode is active the callback *consumes* (swallows) the real input so it never reaches the host OS.
-2. **Capture loop** (`events.go` `runCaptureLoop`) drains the event channel. Mouse moves go into a `movementAccumulator`; a ticker at `moveRateHz` drains accumulated deltas, applies `movementShaper` (deadzone + micro-smoothing) and `moveBackpressureController` (drops/throttles MOVEs when the serial queue is congested), and enqueues `MOVE`/`SCROLL`/button/key commands as strings. `keyStateTracker` de-dupes auto-repeat key events.
-3. **Command queue** — a buffered `chan string` (cap 1024). `enqueueCommand` is lossy by design: when full it silently drops `MOVE` frames but force-evicts to make room for non-MOVE commands (clicks/keys must not be lost).
-4. **Write loop** (`serial_writer.go` `writeLoop`) opens the serial port (auto-detect picks the highest `COMn`), writes commands + `\n`, and owns **auto-reconnect**: any write/open error closes the port, waits `reconnectDelay`, and retries. On (re)connect it sends `RELEASE\nKEYRELEASE\n` to clear stuck buttons/keys.
+`.github/workflows/release-v2.yml` (workflow_dispatch) computes the next tag
+in a `meta` job, then builds Windows, macOS, and firmware in parallel. It is
+the only release pipeline: the legacy `release-main.yml` was deleted because
+it built the v1 app from the *same* tag namespace, so running it would have
+published a v1 binary under the next `v2.x` tag. The v1 source under
+`firmware/` and `software/` is still there and still buildable by hand.
 
-`bridge_runtime.go` wraps this pipeline for the GUI (Start/Stop/Wait, goroutine lifecycle). `main.go` `runCLIBridge` wires it directly for CLI mode. Both emit `bridgeEvent`s (`bridge_events.go`) that the GUI renders as connection status and that gate remote activation.
+## Host architecture
 
-### Remote-mode state machine (in the hook callback)
-Remote mode is the "is input being forwarded to the slave" toggle. It is entered/exited three ways, all handled inside the hook callback:
-- **Hotkey** (`-toggle`, default `F9`, matched against live modifier state via `currentMods`).
-- **Auto / edge** (`-auto-switch`): cursor pushed to the host-side screen boundary (`-host-side`) crosses into the virtual slave. `edgeArmed` debounces this.
-- **Return**: a virtual slave cursor is tracked against `-slave-res`; pushing past the far edge builds `edgeReturnPressure` until it crosses a threshold and snaps back to the host. Optional left-swipe return (`-leftreturn`).
+Pipeline, per run:
 
-While active, the host cursor is pinned to an anchor point and the system cursor is hidden; deltas are computed against the anchor and sent as `MOVE`. **Critical invariant:** if the serial connection drops (`remoteActivationAllowed()` goes false), the callback force-exits remote mode and restores the cursor — the hotkey is intentionally inert while serial is down so you cannot get trapped controlling a disconnected device.
+1. **`internal/capture`** — the OS input hook (Windows low-level hooks;
+   macOS CGEventTap) runs on a locked OS thread and hosts the entire
+   **remote-mode state machine**. While remote mode is active the callback
+   *consumes* real input so it never reaches the host OS. It emits semantic
+   `capture.Event`s on a channel.
+2. **`internal/bridge`** — the pump. Mouse moves go into a
+   `core.MovementAccumulator`; a ticker at `MoveRateHz` drains them, applies
+   `core.MovementShaper` (deadzone + micro-smoothing) and `core.Backpressure`
+   (drops MOVEs when the queue is congested), and enqueues encoded frames.
+   `core.KeyTracker` de-dupes auto-repeat.
+3. **`internal/device`** — finds the C3 by USB VID/PID, owns the serial
+   session, auto-reconnect, and a 1 Hz PING / 3-missed-PONG liveness check.
+   Its queue is lossy by design: `EnqueueMove` drops when full, `Enqueue`
+   evicts to make room (clicks and key releases must not be lost).
 
-### Config & settings
-`config.go` defines the `config` struct and all CLI flags. Precedence: built-in defaults → persisted settings (`%AppData%\ESP HID Bridge\settings.json` via `settings_store_windows.go`) → explicit CLI flags. The GUI writes settings on Start. Adding a tunable means touching `config.go` (struct + flag + validation), `settings_store_*.go` (`persistedSettings` + load/save), and the GUI form.
+### The seam
+`capture.Run(ctx, Options, chan<- Event, activationAllowedFn) error` is the
+**only** thing a platform must implement. Adding a platform means adding one
+file behind that signature; `internal/bridge` is portable and gated
+`//go:build windows || darwin` solely because it imports `capture`.
 
-## Firmware architecture
+### Remote-mode state machine
+Shared across platforms in `internal/capture/geometry.go` (untagged, tested):
+the outer-edge activation probe, the entry inset, the dead-reckoned
+`virtualCursor` with its return-pressure model, and the left-swipe tracker.
+Only the OS plumbing differs per platform. The tuning constants there are
+hard-won — do not adjust them casually.
 
-Modules under `namespace bridge`, each a `.h`/`.cpp` pair compiled by Arduino as separate translation units:
-- `firmware.ino` — `setup()`/`loop()`; sets BLE device/manufacturer name and starts `Keyboard`/`Mouse`.
-- `serial_processor.cpp` — byte-at-a-time line assembler with a fixed 96-byte buffer; oversized lines are dropped until the next `\n` to resync (never blocks/desyncs).
-- `command_dispatch.cpp` — splits a line into command+args and dispatches. All actions no-op unless `Keyboard.isConnected()`. Mouse deltas larger than int8 are chunked into ±127 steps (`sendChunkedMove`) because HID reports are signed-byte deltas.
-- `connection_led.cpp` — built-in LED: solid when no BLE client, a 200 ms pulse every 20 s when connected.
-- `bridge_types.h` — shared constants (`kSerialBaud` 460800, `kMaxLineLength`, HID delta range).
+**Critical invariant:** if the link drops (`activationAllowedFn` goes false),
+the callback force-exits remote mode and restores the cursor. The hotkey is
+intentionally inert while the link is down, so you cannot get trapped
+controlling an unreachable device.
+
+### macOS specifics
+Three things the implementation must keep doing, each fixing a defect in the
+retired v1 macOS app:
+
+- **Re-enable the tap** on `kCGEventTapDisabledByTimeout` /
+  `ByUserInput`, plus a 1 Hz watchdog. macOS disables a tap whose callback is
+  slow; without this, capture dies silently and permanently under load.
+- **Never warp per motion event.** Warping suppresses local mouse events for
+  ~0.25 s. Instead: warp once on entry, re-associate then dissociate with
+  `CGAssociateMouseAndMouseCursorPosition`, and read `kCGMouseEventDeltaX/Y`.
+- **Forward modifiers from `flagsChanged`.** macOS never sends key down/up for
+  pure modifiers. The handler reconciles all 8 usages (`0xE0..0xE7`) against
+  the event flags, seeded silently on entry so the toggle combo itself is not
+  forwarded. Caps Lock and Fn are deliberately excluded.
+
+Never block in the tap callback — only the non-blocking `publish` is allowed.
+`-debug-stall-capture` deliberately stalls it to exercise the recovery path.
+
+macOS also gates capture behind two separate TCC permissions (Accessibility
+*and* Input Monitoring), keyed on **code signature, not path** — so an ad-hoc
+signed build loses its grant on every rebuild.
+
+### Config
+`internal/config` resolves defaults → `settings-v2.json` → CLI flags. Every
+persisted field is a pointer so a missing key keeps its default. Adding a
+tunable means touching `config.go` (struct + flag + validation),
+`settings.go`, and `internal/ui/form.go`.
 
 ## Conventions
 
-- Go: build constraints are load-bearing — keep `//go:build windows` on `software/` files and the `_darwin.go` suffix on macOS-only files, or cross-package builds break.
-- Firmware: keep everything in `namespace bridge`; per-command logic stays as small `executeXxx` helpers in `command_dispatch.cpp`.
-- Baud is hard-coded to `460800` on both ends (`bridge_types.h` and the `-baud` default) — changing one without the other breaks the link.
+- **Build tags are load-bearing.** `_windows.go` / `_darwin.go` suffixes carry
+  implicit GOOS constraints, and that applies to `.c`/`.h`/`.m` files too.
+- **`*_cgkeycode.go` is deliberately not `_darwin.go`.** Those files are pure
+  macOS lookup tables with no cgo, so keeping them untagged means they and
+  their tests compile and run on every platform's CI. Do not rename them.
+- Shared logic goes in an untagged file (`capture.go`, `geometry.go`,
+  `form.go`); only genuine OS plumbing gets a tag.
+- macOS C lives in real `.c`/`.h`/`.m` files, not cgo preamble comments.
+- Firmware: everything in `namespace bridge` equivalents; per-command logic
+  stays as small helpers in `main.c`'s `dispatch()`.
