@@ -1,14 +1,17 @@
 name: Build and Release v2 (host + firmware-idf)
 
 on:
-  # Every merge to main cuts a release with the next patch tag. Manual
-  # dispatch stays available for building from a branch.
+  # Releases are cut by merging to main, and by nothing else. Pushing a
+  # feature branch never triggers this workflow.
   #
-  # Note this fires for any push to main, documentation included. Add a
-  # paths-ignore filter here if doc-only commits should not spend a full
+  # Note it fires for any push to main, documentation included. Add a
+  # paths-ignore filter here if doc-only merges should not spend a full
   # Windows + macOS + firmware build.
   push:
     branches: [main]
+  # Manual escape hatch only — it never fires on its own. Running it against
+  # a feature branch publishes a real release tagged from that branch, so
+  # reach for it only when that is genuinely what you want.
   workflow_dispatch:
 
 permissions:
