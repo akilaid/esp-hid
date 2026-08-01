@@ -30,9 +30,14 @@ jobs:
           GOOS: windows
           GOARCH: amd64
         run: go build ./...
+      # No GOOS=darwin cross-compile here: the macOS capture and GUI layers
+      # are cgo and need the macOS SDK plus clang. The build-macos job is
+      # what type-checks them.
 
-  build-windows:
-    runs-on: windows-latest
+  # Versioning lives in its own job so the Windows and macOS builds can run in
+  # parallel instead of one waiting on the other just to learn the tag.
+  meta:
+    runs-on: ubuntu-latest
     needs: test
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
@@ -42,39 +47,82 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+      - name: Compute next tag
+        id: meta
+        run: |
+          set -euo pipefail
+          latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
+          if [ -z "$latest" ]; then
+            next="v2.0.0"
+          elif [[ "$latest" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major="${BASH_REMATCH[1]}"
+            minor="${BASH_REMATCH[2]}"
+            patch="${BASH_REMATCH[3]}"
+            if [ "$major" -lt 2 ]; then
+              # v1.x tags belong to the legacy Arduino-era app.
+              next="v2.0.0"
+            else
+              next="v${major}.${minor}.$((patch + 1))"
+            fi
+          else
+            echo "Unexpected latest tag format: $latest" >&2
+            exit 1
+          fi
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+          echo "name=Release $next" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    runs-on: windows-latest
+    needs: meta
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: host/go.mod
           cache-dependency-path: host/go.sum
-      - name: Prepare release metadata
-        id: meta
-        shell: pwsh
-        run: |
-          $latest = git tag --list "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | Select-Object -First 1
-          if (-not $latest) {
-            $nextTag = "v2.0.0"
-          } else {
-            if ($latest -notmatch '^v(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$') {
-              throw "Unexpected latest tag format: $latest"
-            }
-            if ([int]$Matches.major -lt 2) {
-              # v1.x tags belong to the legacy Arduino-era app.
-              $nextTag = "v2.0.0"
-            } else {
-              $patch = [int]$Matches.patch + 1
-              $nextTag = "v$($Matches.major).$($Matches.minor).$patch"
-            }
-          }
-          "tag=$nextTag" >> $env:GITHUB_OUTPUT
-          "name=Release $nextTag" >> $env:GITHUB_OUTPUT
       - name: Build
         shell: pwsh
         working-directory: host
-        run: ./build-production.ps1 -Output esp-hid-bridge.exe -Version ${{ steps.meta.outputs.tag }}
+        run: ./build-production.ps1 -Output esp-hid-bridge.exe -Version ${{ needs.meta.outputs.tag }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-exe
           path: host/esp-hid-bridge.exe
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-14
+    needs: meta
+    # Best-effort for the first release cycle, like the firmware job. Once
+    # this has published successfully, drop this and gate `release` on it.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+          cache-dependency-path: host/go.sum
+      # The ubuntu test job never compiles the darwin files, so this is the
+      # only place the cgo capture and GUI code is type-checked at all.
+      - name: Vet and test (darwin, cgo)
+        working-directory: host
+        run: |
+          go vet ./...
+          go test ./... -count=1
+      - name: Build universal .app
+        working-directory: host
+        run: ./build-macos.sh ${{ needs.meta.outputs.tag }}
+      # ditto, not zip: a plain zip drops symlinks and extended attributes and
+      # breaks the bundle's code signature, producing an app macOS refuses to
+      # open.
+      - name: Package bundle
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "host/dist/ESP HID Bridge.app" esp-hid-bridge-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: esp-hid-bridge-macos.zip
           if-no-files-found: error
 
   build-firmware:
@@ -106,11 +154,14 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [build-windows, build-firmware]
-    # Release even if the firmware build failed — the exe is the must-have.
+    needs: [meta, build-windows, build-macos, build-firmware]
+    # Release even if the macOS or firmware build failed — the exe is the
+    # must-have.
     if: ${{ always() && needs.build-windows.result == 'success' }}
     steps:
       - name: Download artifacts
+        # merge-multiple flattens every artifact into one directory, so the
+        # filenames below must not collide.
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -118,11 +169,12 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build-windows.outputs.tag }}
-          name: ${{ needs.build-windows.outputs.name }}
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.name }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: |
             artifacts/esp-hid-bridge.exe
+            artifacts/esp-hid-bridge-macos.zip
             artifacts/firmware-esp32c3.zip

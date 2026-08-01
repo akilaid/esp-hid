@@ -1,11 +1,11 @@
 //go:build windows
 
-// Package capture owns the Windows low-level input hooks and the remote-mode
-// state machine. Ported nearly verbatim from the legacy
-// software/hooks_windows.go — the edge-activation probe, debounce, virtual
-// slave cursor, return-pressure model, and the serial-drop force-exit
-// invariant are preserved exactly. New over legacy: middle mouse button and
-// horizontal wheel capture.
+// Windows input capture: two low-level hooks (WH_MOUSE_LL / WH_KEYBOARD_LL)
+// driving the shared remote-mode state machine that lives in geometry.go.
+// Ported nearly verbatim from the legacy software/hooks_windows.go — the
+// edge-activation probe, debounce, virtual slave cursor, return-pressure
+// model, and the serial-drop force-exit invariant are preserved exactly.
+// New over legacy: middle mouse button and horizontal wheel capture.
 package capture
 
 import (
@@ -49,20 +49,20 @@ const (
 	whKeyboardLL = 13
 	whMouseLL    = 14
 
-	wmQuit         = 0x0012
-	wmKeyDown      = 0x0100
-	wmKeyUp        = 0x0101
-	wmSysKeyDown   = 0x0104
-	wmSysKeyUp     = 0x0105
-	wmMouseMove    = 0x0200
-	wmLButtonDown  = 0x0201
-	wmLButtonUp    = 0x0202
-	wmRButtonDown  = 0x0204
-	wmRButtonUp    = 0x0205
-	wmMButtonDown  = 0x0207
-	wmMButtonUp    = 0x0208
-	wmMouseWheel   = 0x020A
-	wmMouseHWheel  = 0x020E
+	wmQuit        = 0x0012
+	wmKeyDown     = 0x0100
+	wmKeyUp       = 0x0101
+	wmSysKeyDown  = 0x0104
+	wmSysKeyUp    = 0x0105
+	wmMouseMove   = 0x0200
+	wmLButtonDown = 0x0201
+	wmLButtonUp   = 0x0202
+	wmRButtonDown = 0x0204
+	wmRButtonUp   = 0x0205
+	wmMButtonDown = 0x0207
+	wmMButtonUp   = 0x0208
+	wmMouseWheel  = 0x020A
+	wmMouseHWheel = 0x020E
 
 	llkhfInjected = 0x10
 	llmhfInjected = 0x01
@@ -91,69 +91,11 @@ const (
 	ocrNo          = 32648
 	ocrHand        = 32649
 	ocrAppStarting = 32650
-
-	// Tuning constants preserved from the legacy implementation.
-	hostEdgeActivationThreshold = 1
-	edgeReturnPressureThreshold = 48
-	edgeEntryInsetMin           = 24
-	edgeEntryInsetMax           = 160
-	leftwardReturnMinStep       = 6
-	leftwardReturnThreshold     = 900
-	leftwardReturnWindow        = 450 * time.Millisecond
-)
-
-// Host side names (shared vocabulary with config).
-const (
-	HostSideLeft   = "left"
-	HostSideRight  = "right"
-	HostSideTop    = "top"
-	HostSideBottom = "bottom"
 )
 
 var hideSystemCursorIDs = [...]uintptr{
 	ocrNormal, ocrIBeam, ocrWait, ocrCross, ocrUp, ocrSizeNWSE, ocrSizeNESW,
 	ocrSizeWE, ocrSizeNS, ocrSizeAll, ocrNo, ocrHand, ocrAppStarting,
-}
-
-// EventKind discriminates capture events.
-type EventKind int
-
-const (
-	EventMouseDelta EventKind = iota
-	EventButtonDown
-	EventButtonUp
-	EventScroll
-	EventKeyDown
-	EventKeyUp
-	EventRemoteMode
-)
-
-// Event is one captured input event.
-type Event struct {
-	Kind    EventKind
-	DX, DY  int  // EventMouseDelta
-	Button  byte // EventButtonDown/Up: protocol.Button* mask bit
-	ScrollV int  // EventScroll
-	ScrollH int
-	Usage   byte   // EventKeyDown/Up: HID usage
-	Active  bool   // EventRemoteMode
-	Source  string // EventRemoteMode: hotkey|edge|slave_edge|serial
-}
-
-// Options configures the hook state machine.
-type Options struct {
-	CaptureKeyboard bool
-	ToggleHotkey    string // combo name; falls back to hotkey.DefaultName
-	LeftwardReturn  bool
-	SlaveWidth      int
-	SlaveHeight     int
-	HostSide        string
-	AutoSwitch      bool
-}
-
-type point struct {
-	X int32
-	Y int32
 }
 
 type windowsMessage struct {
@@ -187,29 +129,6 @@ type cursorInfo struct {
 	Flags       uint32
 	HCursor     uintptr
 	PtScreenPos point
-}
-
-type monitorRect struct {
-	Left   int32
-	Top    int32
-	Right  int32
-	Bottom int32
-}
-
-func (rect monitorRect) containsPoint(p point) bool {
-	return p.X >= rect.Left && p.X < rect.Right && p.Y >= rect.Top && p.Y < rect.Bottom
-}
-
-func (rect monitorRect) centerPoint() point {
-	width := rect.Right - rect.Left
-	height := rect.Bottom - rect.Top
-	if width <= 0 {
-		width = 1
-	}
-	if height <= 0 {
-		height = 1
-	}
-	return point{X: rect.Left + width/2, Y: rect.Top + height/2}
 }
 
 // currentMods samples the live modifier state into a hotkey.Mod* bitmask.
@@ -255,73 +174,6 @@ func enumerateMonitorRects() ([]monitorRect, error) {
 	return monitorRects, nil
 }
 
-func findMonitorForPoint(p point, monitorRects []monitorRect) (monitorRect, bool) {
-	for _, rect := range monitorRects {
-		if rect.containsPoint(p) {
-			return rect, true
-		}
-	}
-	return monitorRect{}, false
-}
-
-func pointInsideAnyMonitor(p point, monitorRects []monitorRect) bool {
-	_, found := findMonitorForPoint(p, monitorRects)
-	return found
-}
-
-func clampInt32(value, minValue, maxValue int32) int32 {
-	if maxValue < minValue {
-		return minValue
-	}
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
-}
-
-// isOuterActivationEdgePoint reports whether p sits on the activation edge of
-// its monitor AND that edge is the outer boundary of the whole desktop — it
-// probes one pixel past the edge and requires that point to be outside every
-// monitor, so seams between physical monitors never activate.
-func isOuterActivationEdgePoint(p point, rect monitorRect, monitorRects []monitorRect, hostSide string) bool {
-	if !rect.containsPoint(p) {
-		return false
-	}
-	switch hostSide {
-	case HostSideRight:
-		activationX := rect.Left + hostEdgeActivationThreshold
-		if p.X > activationX {
-			return false
-		}
-		sampleY := clampInt32(p.Y, rect.Top, rect.Bottom-1)
-		return !pointInsideAnyMonitor(point{X: rect.Left - 1, Y: sampleY}, monitorRects)
-	case HostSideTop:
-		activationY := rect.Top + hostEdgeActivationThreshold
-		if p.Y > activationY {
-			return false
-		}
-		sampleX := clampInt32(p.X, rect.Left, rect.Right-1)
-		return !pointInsideAnyMonitor(point{X: sampleX, Y: rect.Top - 1}, monitorRects)
-	case HostSideBottom:
-		activationY := rect.Bottom - 1 - hostEdgeActivationThreshold
-		if p.Y < activationY {
-			return false
-		}
-		sampleX := clampInt32(p.X, rect.Left, rect.Right-1)
-		return !pointInsideAnyMonitor(point{X: sampleX, Y: rect.Bottom}, monitorRects)
-	default: // host on the left: activation edge is the right border
-		activationX := rect.Right - 1 - hostEdgeActivationThreshold
-		if p.X < activationX {
-			return false
-		}
-		sampleY := clampInt32(p.Y, rect.Top, rect.Bottom-1)
-		return !pointInsideAnyMonitor(point{X: rect.Right, Y: sampleY}, monitorRects)
-	}
-}
-
 func currentCursorPoint() (point, bool) {
 	var cursorPoint point
 	fetched, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursorPoint)))
@@ -329,20 +181,6 @@ func currentCursorPoint() (point, bool) {
 		return point{}, false
 	}
 	return cursorPoint, true
-}
-
-func absInt(value int) int {
-	if value < 0 {
-		return -value
-	}
-	return value
-}
-
-func publish(out chan<- Event, event Event) {
-	select {
-	case out <- event:
-	default:
-	}
 }
 
 func normalizeWheel(mouseData uint32) int {
@@ -365,7 +203,9 @@ func getSystemMetric(index int32) int32 {
 	return int32(value)
 }
 
-func virtualCenterPoint() point {
+// virtualDesktopRect is the bounding box of every monitor, used as the
+// single-monitor fallback whenever EnumDisplayMonitors comes up empty.
+func virtualDesktopRect() monitorRect {
 	left := getSystemMetric(smXVirtualScreen)
 	top := getSystemMetric(smYVirtualScreen)
 	width := getSystemMetric(smCXVirtualScreen)
@@ -384,7 +224,11 @@ func virtualCenterPoint() point {
 	if height <= 0 {
 		height = 1
 	}
-	return point{X: left + width/2, Y: top + height/2}
+	return monitorRect{Left: left, Top: top, Right: left + width, Bottom: top + height}
+}
+
+func virtualCenterPoint() point {
+	return virtualDesktopRect().centerPoint()
 }
 
 func setCursorPosition(x, y int32) {
@@ -470,30 +314,14 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 	if toggleVK == 0 {
 		toggleVK, toggleMods = hotkey.Parse(hotkey.DefaultName)
 	}
-	slaveWidth := opts.SlaveWidth
-	slaveHeight := opts.SlaveHeight
-	if slaveWidth <= 0 {
-		slaveWidth = 1920
-	}
-	if slaveHeight <= 0 {
-		slaveHeight = 1080
-	}
-	hostSide := opts.HostSide
-	switch hostSide {
-	case HostSideLeft, HostSideRight, HostSideTop, HostSideBottom:
-	default:
-		hostSide = HostSideLeft
-	}
+	hostSide := normalizeHostSide(opts.HostSide)
+	slaveCursor := newVirtualCursor(opts.SlaveWidth, opts.SlaveHeight, hostSide)
+	leftwardReturn := &leftwardReturnTracker{enabled: opts.LeftwardReturn, hostSide: hostSide}
 
 	remoteModeActive := false
 	systemCursorHidden := false
 	edgeArmed := true
 	hotkeyDown := false
-	leftwardReturnDistance := 0
-	leftwardReturnWindowStart := time.Time{}
-	edgeReturnPressure := 0
-	virtualSlaveX := slaveWidth / 2
-	virtualSlaveY := slaveHeight / 2
 	remoteAnchor := virtualCenterPoint()
 
 	defer func() {
@@ -543,235 +371,18 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 	canActivateFromHostEdge := func(p point) bool {
 		rect, found := findMonitor(p)
 		if !found {
-			virtualLeft := getSystemMetric(smXVirtualScreen)
-			virtualTop := getSystemMetric(smYVirtualScreen)
-			virtualWidth := getSystemMetric(smCXVirtualScreen)
-			virtualHeight := getSystemMetric(smCYVirtualScreen)
-			if virtualWidth <= 0 {
-				virtualLeft = 0
-				virtualWidth = getSystemMetric(smCXScreen)
-			}
-			if virtualHeight <= 0 {
-				virtualTop = 0
-				virtualHeight = getSystemMetric(smCYScreen)
-			}
-			if virtualWidth <= 0 {
-				virtualWidth = 1
-			}
-			if virtualHeight <= 0 {
-				virtualHeight = 1
-			}
-			virtualRight := virtualLeft + virtualWidth - 1
-			virtualBottom := virtualTop + virtualHeight - 1
-			switch hostSide {
-			case HostSideRight:
-				return p.X <= virtualLeft+hostEdgeActivationThreshold
-			case HostSideTop:
-				return p.Y <= virtualTop+hostEdgeActivationThreshold
-			case HostSideBottom:
-				return p.Y >= virtualBottom-hostEdgeActivationThreshold
-			default:
-				return p.X >= virtualRight-hostEdgeActivationThreshold
-			}
+			// No known monitor contains the cursor: fall back to the whole
+			// virtual desktop. With no other rects to probe against, only its
+			// true outer border activates.
+			return isOuterActivationEdgePoint(p, virtualDesktopRect(), nil, hostSide)
 		}
 		return isOuterActivationEdgePoint(p, rect, monitorRects, hostSide)
 	}
-	entryInsetForAxis := func(axisLength int) int {
-		inset := axisLength / 12
-		if inset < edgeEntryInsetMin {
-			inset = edgeEntryInsetMin
-		}
-		if inset > edgeEntryInsetMax {
-			inset = edgeEntryInsetMax
-		}
-		if inset >= axisLength {
-			inset = axisLength / 2
-		}
-		if inset < 0 {
-			inset = 0
-		}
-		return inset
-	}
-	setVirtualSlaveCursorForActivation := func(source string) {
-		entryX := slaveWidth / 2
-		entryY := slaveHeight / 2
-		if source == "edge" {
-			insetX := entryInsetForAxis(slaveWidth)
-			insetY := entryInsetForAxis(slaveHeight)
-			switch hostSide {
-			case HostSideLeft:
-				entryX = insetX
-			case HostSideRight:
-				entryX = slaveWidth - 1 - insetX
-			case HostSideTop:
-				entryY = insetY
-			case HostSideBottom:
-				entryY = slaveHeight - 1 - insetY
-			}
-		}
-		if entryX < 0 {
-			entryX = 0
-		} else if entryX >= slaveWidth {
-			entryX = slaveWidth - 1
-		}
-		if entryY < 0 {
-			entryY = 0
-		} else if entryY >= slaveHeight {
-			entryY = slaveHeight - 1
-		}
-		virtualSlaveX = entryX
-		virtualSlaveY = entryY
-		edgeReturnPressure = 0
-	}
-	resetEdgeReturnPressure := func() {
-		edgeReturnPressure = 0
-	}
-	// Dead-reckons the cursor position on the slave; pushing past the
-	// host-facing edge builds pressure (decaying at 2x movement) until the
-	// return threshold trips.
-	updateVirtualSlaveCursorAndCheckReturn := func(dx, dy int) bool {
-		nextX := virtualSlaveX + dx
-		nextY := virtualSlaveY + dy
-		overflow := 0
-		switch hostSide {
-		case HostSideLeft:
-			if nextX < 0 && dx < 0 {
-				overflow = -nextX
-			}
-		case HostSideRight:
-			if nextX >= slaveWidth && dx > 0 {
-				overflow = nextX - (slaveWidth - 1)
-			}
-		case HostSideTop:
-			if nextY < 0 && dy < 0 {
-				overflow = -nextY
-			}
-		case HostSideBottom:
-			if nextY >= slaveHeight && dy > 0 {
-				overflow = nextY - (slaveHeight - 1)
-			}
-		}
-		if overflow > 0 {
-			edgeReturnPressure += overflow
-		} else {
-			decay := absInt(dx) + absInt(dy)
-			if decay < 1 {
-				decay = 1
-			}
-			edgeReturnPressure -= decay * 2
-			if edgeReturnPressure < 0 {
-				edgeReturnPressure = 0
-			}
-		}
-		if nextX < 0 {
-			nextX = 0
-		} else if nextX >= slaveWidth {
-			nextX = slaveWidth - 1
-		}
-		if nextY < 0 {
-			nextY = 0
-		} else if nextY >= slaveHeight {
-			nextY = slaveHeight - 1
-		}
-		virtualSlaveX = nextX
-		virtualSlaveY = nextY
-		return edgeReturnPressure >= edgeReturnPressureThreshold
-	}
-	resetLeftwardReturnDistance := func() {
-		leftwardReturnDistance = 0
-		leftwardReturnWindowStart = time.Time{}
-	}
-	updateLeftwardReturnDistance := func(dx, dy int) bool {
-		if !opts.LeftwardReturn || hostSide != HostSideLeft {
-			return false
-		}
-		if dx >= 0 {
-			leftwardReturnDistance = 0
-			leftwardReturnWindowStart = time.Time{}
-			return false
-		}
-		if absInt(dx) < leftwardReturnMinStep {
-			return false
-		}
-		if absInt(dy) > absInt(dx)*2 {
-			leftwardReturnDistance = 0
-			leftwardReturnWindowStart = time.Time{}
-			return false
-		}
-		now := time.Now()
-		if leftwardReturnDistance == 0 || leftwardReturnWindowStart.IsZero() {
-			leftwardReturnWindowStart = now
-		} else if now.Sub(leftwardReturnWindowStart) > leftwardReturnWindow {
-			leftwardReturnDistance = 0
-			leftwardReturnWindowStart = now
-		}
-		leftwardReturnDistance += -dx
-		if leftwardReturnDistance < 0 {
-			leftwardReturnDistance = 0
-		}
-		return leftwardReturnDistance >= leftwardReturnThreshold
-	}
 	returnToHostPointForAnchor := func(current point) point {
 		if rect, found := findMonitor(remoteAnchor); found {
-			targetX := clampInt32(current.X, rect.Left, rect.Right-1)
-			targetY := clampInt32(current.Y, rect.Top, rect.Bottom-1)
-			switch hostSide {
-			case HostSideRight:
-				targetX = rect.Left + 1
-				if targetX >= rect.Right {
-					targetX = rect.Left
-				}
-			case HostSideTop:
-				targetY = rect.Top + 1
-				if targetY >= rect.Bottom {
-					targetY = rect.Top
-				}
-			case HostSideBottom:
-				targetY = rect.Bottom - 2
-				if targetY < rect.Top {
-					targetY = rect.Top
-				}
-			default:
-				targetX = rect.Right - 2
-				if targetX < rect.Left {
-					targetX = rect.Left
-				}
-			}
-			return point{X: targetX, Y: targetY}
+			return returnPointInRect(current, rect, hostSide)
 		}
-		virtualLeft := getSystemMetric(smXVirtualScreen)
-		virtualTop := getSystemMetric(smYVirtualScreen)
-		virtualWidth := getSystemMetric(smCXVirtualScreen)
-		virtualHeight := getSystemMetric(smCYVirtualScreen)
-		if virtualWidth <= 0 {
-			virtualLeft = 0
-			virtualWidth = getSystemMetric(smCXScreen)
-		}
-		if virtualHeight <= 0 {
-			virtualTop = 0
-			virtualHeight = getSystemMetric(smCYScreen)
-		}
-		if virtualWidth <= 0 {
-			virtualWidth = 1
-		}
-		if virtualHeight <= 0 {
-			virtualHeight = 1
-		}
-		virtualRight := virtualLeft + virtualWidth - 1
-		virtualBottom := virtualTop + virtualHeight - 1
-		targetX := clampInt32(current.X, virtualLeft, virtualRight)
-		targetY := clampInt32(current.Y, virtualTop, virtualBottom)
-		switch hostSide {
-		case HostSideRight:
-			targetX = virtualLeft + 1
-		case HostSideTop:
-			targetY = virtualTop + 1
-		case HostSideBottom:
-			targetY = virtualBottom - 1
-		default:
-			targetX = virtualRight - 1
-		}
-		return point{X: targetX, Y: targetY}
+		return returnPointInRect(current, virtualDesktopRect(), hostSide)
 	}
 	setRemoteAnchorForPoint := func(p point) {
 		if rect, found := findMonitor(p); found {
@@ -783,7 +394,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 	if cursorPoint, ok := currentCursorPoint(); ok {
 		setRemoteAnchorForPoint(cursorPoint)
 	}
-	setVirtualSlaveCursorForActivation("hotkey")
+	slaveCursor.resetForActivation("hotkey")
 
 	activationAllowed := func() bool {
 		if activationAllowedFn == nil {
@@ -805,8 +416,8 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 		setCursorPosition(returnPoint.X, returnPoint.Y)
 		setRemoteModeActive(false, "serial")
 		edgeArmed = true
-		resetLeftwardReturnDistance()
-		resetEdgeReturnPressure()
+		leftwardReturn.reset()
+		slaveCursor.resetPressure()
 	}
 
 	mouseCallback := windows.NewCallback(func(nCode uintptr, wParam uintptr, lParam *msllHookStruct) uintptr {
@@ -825,16 +436,16 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 			if !remoteModeActive && uint32(wParam) == wmMouseMove {
 				if !activationAllowed() {
 					edgeArmed = true
-					resetLeftwardReturnDistance()
-					resetEdgeReturnPressure()
+					leftwardReturn.reset()
+					slaveCursor.resetPressure()
 				} else if opts.AutoSwitch && canActivateFromHostEdge(lParam.Pt) {
 					if edgeArmed {
 						setRemoteAnchorForPoint(lParam.Pt)
-						setVirtualSlaveCursorForActivation("edge")
+						slaveCursor.resetForActivation("edge")
 						setRemoteModeActive(true, "edge")
 						edgeArmed = false
-						resetLeftwardReturnDistance()
-						resetEdgeReturnPressure()
+						leftwardReturn.reset()
+						slaveCursor.resetPressure()
 						setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
 						return 1
 					}
@@ -859,17 +470,17 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 				case wmMouseMove:
 					dx := int(lParam.Pt.X - remoteAnchor.X)
 					dy := int(lParam.Pt.Y - remoteAnchor.Y)
-					shouldReturn := updateVirtualSlaveCursorAndCheckReturn(dx, dy)
+					shouldReturn := slaveCursor.move(dx, dy)
 					if !shouldReturn {
-						shouldReturn = updateLeftwardReturnDistance(dx, dy)
+						shouldReturn = leftwardReturn.update(dx, dy, time.Now())
 					}
 					if shouldReturn {
 						returnPoint := returnToHostPointForAnchor(lParam.Pt)
 						setCursorPosition(returnPoint.X, returnPoint.Y)
 						setRemoteModeActive(false, "slave_edge")
 						edgeArmed = false
-						resetLeftwardReturnDistance()
-						resetEdgeReturnPressure()
+						leftwardReturn.reset()
+						slaveCursor.resetPressure()
 						return 1
 					}
 					if dx != 0 || dy != 0 {
@@ -932,7 +543,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 								if cursorPoint, ok := currentCursorPoint(); ok {
 									setRemoteAnchorForPoint(cursorPoint)
 								}
-								setVirtualSlaveCursorForActivation("hotkey")
+								slaveCursor.resetForActivation("hotkey")
 								setRemoteModeActive(true, "hotkey")
 								setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
 							} else {
@@ -941,8 +552,8 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 								setRemoteModeActive(false, "hotkey")
 							}
 							edgeArmed = false
-							resetLeftwardReturnDistance()
-							resetEdgeReturnPressure()
+							leftwardReturn.reset()
+							slaveCursor.resetPressure()
 						}
 					}
 				} else if isKeyUp {

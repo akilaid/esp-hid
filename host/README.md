@@ -1,11 +1,12 @@
-# host — Windows sender for firmware-idf
+# host — Windows and macOS sender for firmware-idf
 
-Go rewrite of the PC-side app, paired with `../firmware-idf/`. Windows-first;
-the platform-independent packages (`protocol`, `device`, `core`, `config`,
-`keymap`, `hotkey`) build and test on any OS, and a `-cli` diagnostics mode
+Go rewrite of the PC-side app, paired with `../firmware-idf/`. Windows and
+macOS both get a native GUI and full input capture; the platform-independent
+packages (`protocol`, `device`, `core`, `config`, `keymap`, `hotkey`, and the
+form/geometry logic) build and test on any OS, and a `-cli` diagnostics mode
 runs anywhere.
 
-What's new over the legacy `software/`:
+What's new over the legacy `software/` and `software-macos/`:
 
 - **Zero-config device discovery**: finds the ESP32-C3 by USB VID/PID
   `303A:1001` — no COM-port guessing, no port picker.
@@ -14,29 +15,125 @@ What's new over the legacy `software/`:
   has a **Clear device bonds** button for stale-pairing recovery.
 - Remote mode requires serial **and** BLE connected; it force-exits if
   either drops (you can't get trapped controlling an unreachable device).
-- Middle mouse button and horizontal scroll now forwarded.
-- Settings survive schema growth (`%AppData%\ESP HID Bridge\settings-v2.json`).
+- Middle/back/forward mouse buttons and horizontal scroll now forwarded.
+- Settings survive schema growth (`settings-v2.json`).
+- **One macOS app that speaks the v2 protocol.** The old `software-macos/`
+  spoke the retired newline-text protocol and could not talk to
+  `firmware-idf/` at all.
 
 ## Build
 
-On Windows:
+### Windows
 
 ```powershell
 cd host
 go mod tidy
 ./build-production.ps1                # GUI exe, embedded icons
 ./esp-hid-bridge.exe                  # GUI (default)
-./esp-hid-bridge.exe -gui=false      # headless capture, console logs
-./esp-hid-bridge.exe -cli            # diagnostics only (no capture)
+./esp-hid-bridge.exe -gui=false       # headless capture, console logs
+./esp-hid-bridge.exe -cli             # diagnostics only (no capture)
 ```
 
-Or download `esp-hid-bridge.exe` from GitHub Releases (built by
-`.github/workflows/release-v2.yml`, manual dispatch).
+### macOS
 
-Cross-compile check from macOS/Linux: `GOOS=windows GOARCH=amd64 go build ./...`
+Needs the Xcode Command Line Tools (`xcode-select --install`) — the capture
+and GUI layers are cgo.
+
+```bash
+cd host
+go mod tidy
+./build-macos.sh                      # universal .app in dist/
+open "dist/ESP HID Bridge.app"
+
+go run ./cmd/bridge -gui=false        # headless capture, console logs
+go run ./cmd/bridge -cli              # diagnostics only (no capture)
+```
+
+Or download from GitHub Releases (built by
+`.github/workflows/release-v2.yml`, manual dispatch): `esp-hid-bridge.exe`
+for Windows, `esp-hid-bridge-macos.zip` for macOS.
+
+## macOS permissions
+
+macOS gates input capture behind **two** separate privileges, both in
+System Settings → Privacy & Security:
+
+| Permission | Needed for |
+|---|---|
+| **Accessibility** | Creating the event tap at all |
+| **Input Monitoring** | Seeing keyboard events |
+
+Granting only Accessibility gives you a working mouse and a dead keyboard —
+which is why the app checks both and names the missing one in a banner rather
+than reporting a generic error. Use the **Grant Permission…** and **Open
+System Settings** buttons in that banner; the app rechecks once a second and
+starts on its own once both are in place. If a grant seems not to take
+effect, quit and reopen the app.
+
+Two macOS behaviours worth knowing:
+
+- **Permissions are tied to the app's code signature, not its path.** The
+  release build is ad-hoc signed, so its signature changes with every
+  version and the grants must be renewed after an update. To reset a state
+  that has got confused:
+  ```bash
+  tccutil reset Accessibility com.espbridge.hid-bridge
+  tccutil reset ListenEvent com.espbridge.hid-bridge
+  ```
+  When running the bare binary from a terminal (`go run ./cmd/bridge`), the
+  grant is attributed to the *terminal*, not to the binary — which makes for
+  a convenient development loop.
+- **Secure Event Input** silently blocks keyboard events from reaching every
+  event tap while any app has a password field focused. The mouse keeps
+  working and typing stops; the app detects this and says so.
+
+### Gatekeeper
+
+The released `.app` is ad-hoc signed but not notarized, so a copy downloaded
+through a browser is quarantined. Either right-click → **Open** once, or:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/ESP HID Bridge.app"
+```
 
 ## Test
 
 ```bash
 go vet ./... && go test ./...
 ```
+
+Cross-compile check for Windows from macOS/Linux:
+`GOOS=windows GOARCH=amd64 go build ./...`. There is no darwin cross-compile
+check — the macOS capture and GUI are cgo and need the macOS SDK, so the
+`build-macos` CI job on `macos-14` is what type-checks them.
+
+There is also an opt-in integration test that drives the real macOS event
+tap. It needs both permissions and **briefly takes over system input**, so it
+is gated behind a build tag and an environment variable:
+
+```bash
+ESP_HID_CAPTURE_INTEGRATION=1 go test -tags capture_integration \
+    ./internal/capture/ -run Integration -v
+```
+
+It is the only way to verify things that cannot be unit-tested: that the tap
+receives events at all, and that the scroll signs, mouse button numbers, and
+modifier-key reconciliation match what the firmware expects.
+
+## Layout
+
+| Path | Role |
+|---|---|
+| `internal/protocol` | Wire codec (frames, CRC-8, message types) |
+| `internal/device` | Serial link: VID/PID discovery, reconnect, PING liveness |
+| `internal/core` | Movement accumulator, shaper, backpressure, key tracker |
+| `internal/config` | Config struct, flags, persisted settings |
+| `internal/keymap` | Windows VK and macOS CGKeyCode → HID usage tables |
+| `internal/hotkey` | Toggle-combo grammar; VK is the canonical key identity |
+| `internal/capture` | Remote-mode state machine + per-OS input hooks |
+| `internal/bridge` | Wires capture → pipeline → device; start/stop lifecycle |
+| `internal/ui` | Shared form logic plus the walk and AppKit GUIs |
+
+Files named `*_cgkeycode.go` are macOS lookup tables that are deliberately
+**not** `_darwin.go`: they are pure data, so keeping them untagged means they
+and their tests compile and run on every platform's CI.

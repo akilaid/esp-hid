@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package main
 
@@ -10,11 +10,12 @@ import (
 	"esp-hid/host/internal/config"
 )
 
-// Non-Windows builds support CLI diagnostics only; capture and GUI are
-// Windows features (macOS capture is a planned follow-up).
+// Input capture is implemented for Windows and macOS. Everywhere else the
+// protocol, device, and pipeline packages still build, so the binary is
+// useful as a diagnostics tool even though it cannot forward input.
 func run(cfg config.Config) error {
 	if !cfg.CLIMode {
-		log.Print("capture/GUI are Windows-only for now; running CLI mode")
+		log.Print("input capture is available on Windows and macOS only; running CLI mode")
 	}
 	return runCLI(cfg)
 }

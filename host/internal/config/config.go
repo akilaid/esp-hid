@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// Host placement relative to the slave device. This is the shared vocabulary
+// for the -host-side flag, the persisted setting, and the GUI pickers.
+const (
+	HostSideLeft   = "left"
+	HostSideRight  = "right"
+	HostSideTop    = "top"
+	HostSideBottom = "bottom"
+)
+
 // Config is the resolved runtime configuration.
 type Config struct {
 	PortOverride    string        // empty = auto-discover by USB VID/PID
@@ -27,6 +36,11 @@ type Config struct {
 	AutoSwitch      bool
 	GUIMode         bool
 	CLIMode         bool // headless diagnostics mode
+
+	// DebugStallCapture deliberately stalls the first captured input event so
+	// the OS disables the hook/tap, exercising the recovery path. Diagnostic
+	// only, never persisted.
+	DebugStallCapture bool
 }
 
 // Defaults returns the built-in configuration.
@@ -38,7 +52,7 @@ func Defaults() Config {
 		AdaptiveMoves:   true,
 		SlaveWidth:      1920,
 		SlaveHeight:     1080,
-		HostSide:        "left",
+		HostSide:        HostSideLeft,
 		ReconnectDelay:  750 * time.Millisecond,
 		CaptureKeyboard: true,
 		ToggleHotkey:    "F9",
@@ -70,6 +84,8 @@ func Parse(args []string) (Config, error) {
 	autoSwitch := fs.Bool("auto-switch", cfg.AutoSwitch, "jump to remote device when the cursor hits the screen edge")
 	gui := fs.Bool("gui", cfg.GUIMode, "run with GUI")
 	cli := fs.Bool("cli", false, "headless diagnostics mode (implies -gui=false)")
+	debugStall := fs.Bool("debug-stall-capture", false,
+		"diagnostic: stall the first captured event so the OS disables the hook, to verify recovery")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -87,6 +103,7 @@ func Parse(args []string) (Config, error) {
 	cfg.AutoSwitch = *autoSwitch
 	cfg.GUIMode = *gui && !*cli
 	cfg.CLIMode = *cli
+	cfg.DebugStallCapture = *debugStall
 
 	width, height, err := ParseResolution(*slaveRes)
 	if err != nil {
@@ -116,7 +133,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("reconnect delay must be greater than 0")
 	}
 	switch c.HostSide {
-	case "left", "right", "top", "bottom":
+	case HostSideLeft, HostSideRight, HostSideTop, HostSideBottom:
 	default:
 		return fmt.Errorf("invalid host-side %q (supported: left|right|top|bottom)", c.HostSide)
 	}

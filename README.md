@@ -1,216 +1,144 @@
 # ESP HID Bridge
 
-ESP HID Bridge lets a Windows PC forward mouse and keyboard input to an ESP32 over USB serial, then the ESP32 re-emits it as Bluetooth LE HID (mouse + keyboard) to a paired phone/tablet.
+ESP HID Bridge forwards a PC's mouse and keyboard to an ESP32 over USB, and
+the ESP32 re-emits them as Bluetooth LE HID (combined mouse + keyboard) to a
+paired phone or tablet. Your PC's own mouse and keyboard drive the phone.
 
 ## Highlights
 
-- Windows-native sender written in Go.
-- ESP32 firmware using BLE Combo HID.
-- GUI mode (default) with system tray behavior.
-- CLI mode for terminal-only workflows.
-- Auto serial reconnect and safety key/button release.
-- Remote mode toggle hotkey (configurable combo, e.g. `Alt+F7`), gated by serial connection health.
-- Dual switching modes: **Auto** (edge-based) and **Manual** (hotkey-only).
+- **Windows and macOS** senders, both written in Go, each with a native GUI.
+- ESP32-C3 firmware built on ESP-IDF and NimBLE.
+- Zero-config device discovery by USB VID/PID — no port picker.
+- A binary, bidirectional protocol: the app shows the device's Bluetooth
+  state and firmware version, and can clear stale pairings.
+- Remote mode toggled by a configurable hotkey (e.g. `Alt+F7`) or by pushing
+  the cursor into the edge of the screen.
+- Auto-reconnect, and a hard guarantee that you can never be trapped
+  controlling a device the link cannot reach.
 
 ## Demo
 
 [![esp-hid bridge demo](assets/esp-hid-bridge.gif)](https://youtu.be/TuCsHALIvrs)
 
-## Repository Layout
+## Repository layout
 
-- `firmware/`: Arduino sketch and serial command parser for ESP32.
-- `firmware/libraries/ESP32-BLE-Combo/`: bundled BLE Combo library copy.
-- `software/`: Windows sender app (hooks, serial runtime, GUI, tray integration).
-- `software/main.go`: program entrypoint (`-gui=true` by default).
+The project has two generations. **v2 is the current one.**
 
-## How It Works
+| Path | Role |
+|---|---|
+| `firmware-idf/` | **v2 firmware.** ESP-IDF v6.0, ESP32-C3, NimBLE. |
+| `host/` | **v2 sender.** Go, Windows + macOS. |
+| `firmware/` | v1 firmware (Arduino sketch). Superseded. |
+| `software/` | v1 Windows sender. Superseded. |
 
-1. The Windows app installs low-level input hooks.
-2. In remote mode, mouse/keyboard activity is converted into compact text commands.
-3. Commands are sent over USB serial to the ESP32.
-4. ESP32 parses commands and emits BLE HID reports to the paired target device.
+The two generations speak different wire protocols and are not
+interchangeable: a v1 app cannot drive v2 firmware or vice versa. The v1
+tree is kept only for boards still running the Arduino sketch. The retired v1
+macOS app (`software-macos/`) has been removed — `host/` replaces it.
+
+The contract that holds v2 together is the **binary wire protocol**, specified
+in [`firmware-idf/docs/PROTOCOL.md`](firmware-idf/docs/PROTOCOL.md) and
+implemented three times over: `firmware-idf/main/protocol.c`,
+`host/internal/protocol/protocol.go`, and `firmware-idf/tools/hidctl.py`.
+Changing a message means changing all of them.
+
+## How it works
+
+1. The sender installs a low-level input hook (Windows) or a CGEventTap
+   (macOS).
+2. In remote mode it swallows your real input rather than letting it reach
+   the desktop, and turns it into binary frames.
+3. Frames go over the ESP32-C3's native USB serial link.
+4. The firmware replays them as BLE HID reports to the paired device.
+
+## Quick start
+
+1. **Flash the firmware** — see [`firmware-idf/README.md`](firmware-idf/README.md).
+2. **Pair your phone** with the Bluetooth device `ESP-HID-ME`.
+3. **Connect the ESP32-C3 to your computer** over USB.
+4. **Run the sender** — see [`host/README.md`](host/README.md) for builds,
+   downloads, and (on macOS) the permissions it needs.
+5. Press the toggle hotkey (`F9` by default), or push the cursor into the
+   screen edge, and your input goes to the phone. Press it again to come
+   back.
 
 ## Requirements
 
-### Firmware Side
+**Device:** an ESP32-C3 board. The v2 firmware uses the chip's native USB
+Serial/JTAG peripheral, so no USB-serial adapter chip is involved.
 
-- ESP32 development board (classic ESP32, ESP32-S3, ESP32-C3, etc.).
-- Arduino IDE 2.x.
-- Espressif ESP32 board package (core 3.x recommended).
-- `NimBLE-Arduino` library by h2zero (v2.x) — install via Arduino Library Manager. The bundled `ESP32-BLE-Combo` now runs on the NimBLE stack, which is required for reliable BLE-HID pairing on the newer RISC-V/S3 chips (the legacy Bluedroid stack crashes during BLE init on ESP32-C3/S3).
+**Windows:** Windows 10/11, Go 1.22+ to build from source.
 
-### Software Side
+**macOS:** macOS 11 or later, Go 1.22+ and the Xcode Command Line Tools to
+build from source. macOS also requires two privacy permissions —
+**Accessibility** and **Input Monitoring** — which the app detects and walks
+you through granting.
 
-- Windows 10/11.
-- Go 1.22+.
-- USB serial connection to ESP32.
+## Remote mode
 
-## Firmware Setup (ESP32)
+- **Auto** switching activates remote mode when the cursor reaches the
+  host-side edge of your desktop. Seams between multiple monitors never
+  trigger it — only the true outer boundary does.
+- **Manual** switching uses the hotkey only.
+- Coming back works by hotkey, by pushing the cursor against the far edge of
+  the device's screen, or optionally by a deliberate left-swipe
+  (`-leftreturn`).
+- Remote mode requires the serial link **and** a connected Bluetooth host. If
+  either drops, remote mode exits, the cursor is restored, and all keys and
+  buttons are released. The hotkey is deliberately inert while the link is
+  down, so you cannot enter a mode you would not be able to leave.
 
-1. Open `firmware/firmware.ino` in Arduino IDE.
-2. Select your ESP32 board and COM port.
-3. Install the `NimBLE-Arduino` library (h2zero, v2.x) from the Arduino Library Manager. The bundled `ESP32-BLE-Combo` depends on it.
-4. Ensure the `ESP32-BLE-Combo` library is available in your Arduino `libraries` folder.
-	 - **IMPORTANT**: This repository bundles a specific version of `ESP32-BLE-Combo` that is already patched to support ESP32 Core `3.x.x`.
-	 - **Recommended Method**: Create a shortcut or symbolic link (symlink) from `firmware/libraries/ESP32-BLE-Combo/` to your local Arduino `libraries` folder (usually located in `Documents/Arduino/libraries` in Windows). This ensures you use the patched version while keeping it synchronized with the repo.
-4. Build and upload.
+## Firmware LED
 
-Default firmware values:
+- No Bluetooth client connected: the LED stays on.
+- Client connected: a 200 ms pulse every 20 seconds.
 
-- Serial baud: `460800`.
-- BLE device name: `PC Bridge Combo`.
-- BLE manufacturer: `ESP HID Bridge`.
+## Settings
 
-### Build/Flash With Arduino CLI
+Stored as JSON and re-read at startup; explicit command-line flags override
+them for that run.
 
-From `firmware/`:
+- Windows: `%AppData%\ESP HID Bridge\settings-v2.json`
+- macOS: `~/Library/Application Support/ESP HID Bridge/settings-v2.json`
 
-```powershell
-# Build firmware into firmware\out\
-arduino-cli compile --fqbn esp32:esp32:esp32 --libraries libraries --output-dir out .
+## Command-line flags
 
-# Flash previously built firmware (replace COM9 with your ESP32 port)
-arduino-cli upload -p COM9 -b esp32:esp32:esp32 --input-dir out -t
-```
+Both platforms accept the same flags.
 
-## Software Setup (Windows)
-
-From `software/`:
-
-```powershell
-go mod tidy
-# Production GUI build (no terminal window when opening the EXE)
-go build -trimpath -ldflags "-H=windowsgui -s -w" -o esp-hid-bridge.exe .
-```
-
-Optional helper script:
-
-```powershell
-.\build-production.ps1
-```
-
-If you run `go build .`, Go produces a console-subsystem EXE (`software.exe`) which opens a terminal window.
-
-Run GUI mode (default):
-
-```powershell
-.\esp-hid-bridge.exe
-```
-
-Run CLI mode:
-
-```powershell
-.\esp-hid-bridge.exe -gui=false -port auto
-```
-
-## GUI Behavior
-
-- App starts hidden in system tray.
-- Left-click tray icon opens the main window.
-- Closing the window hides it to tray.
-- Tray menu `Exit` fully terminates the app.
-
-Bridge status in GUI:
-
-- Green text: connected.
-- Amber text: transitional/waiting state (starting/stopping/stopped).
-- Red text: connection/capture failure.
-
-## Settings Persistence
-
-- User settings are saved in `%AppData%\\ESP HID Bridge\\settings.json`.
-- GUI mode writes settings when you start the bridge from the app window.
-- On startup, saved settings are used as defaults.
-- Any explicit command-line flags override saved settings for that run.
-
-## Remote Mode Behavior
-
-- Remote mode can be switched between two behaviors in the GUI:
-	- **Auto (Switch at edge of screens)**: Activates when moving cursor to the host-side boundary.
-	- **Manual (Hotkey toggle only)**: Only activates when the configured hotkey combo is pressed.
-- Hotkey can be any key or combination (e.g. `Ctrl+Alt+S`, `F9`, `Num +`).
-- The GUI includes a **Record** button to easily assign new hotkeys by pressing them.
-- Host return always works via the toggle hotkey.
-- Edge-aware return (in Auto mode) can be configured with slave resolution and host-side placement settings.
-- Optional left-swipe return can also be enabled (`-leftreturn=true`).
-- Toggle hotkey only works when serial connection is healthy.
-- If serial drops while remote mode is active, remote mode is disabled and release commands are sent.
-
-## Firmware LED Indicator
-
-- No BLE client connected: ESP32 built-in LED stays on continuously.
-- BLE client connected: ESP32 built-in LED blinks for 200ms every 20 seconds.
-
-## Command-Line Flags
-
-All flags apply to both GUI and CLI modes:
-
-- `-port`: serial port or `auto` (default `auto`).
-- `-baud`: serial baud rate (default `460800`).
-- `-rate`: movement send rate Hz (default `45`).
-- `-deadzone`: ignore tiny move deltas up to this absolute value (default `1`, `0` disables).
-- `-smooth`: micro-smoothing factor for small movement (default `0.2`, range `[0, 1)`, `0` disables).
-- `-adaptive`: adapt move send cadence when serial queue is congested (default `true`).
-- `-slave-res`: virtual slave resolution `WIDTHxHEIGHT` for edge-aware return (default `1920x1080`).
-	- GUI includes common laptop and mobile/tablet presets and also accepts custom `WIDTHxHEIGHT` values.
-- `-host-side`: host placement relative to slave (`left|right|top|bottom`, default `left`).
-- `-leftreturn`: allow host return by deliberate quick left-swipe in remote mode (default `false`).
-- `-reconnect`: reconnect delay after serial failure (default `750ms`).
+- `-port`: serial port override (default: auto-detect by USB ID `303A:1001`).
+- `-rate`: movement send rate in Hz (default `45`).
+- `-deadzone`: ignore move deltas up to this absolute value (default `1`).
+- `-smooth`: micro-smoothing factor for small movement (default `0.2`).
+- `-adaptive`: adapt send cadence when the link is congested (default `true`).
+- `-slave-res`: device resolution `WIDTHxHEIGHT` for edge-aware return
+  (default `1920x1080`).
+- `-host-side`: where this computer sits relative to the device
+  (`left|right|top|bottom`, default `left`).
+- `-leftreturn`: allow returning by a quick left-swipe (default `false`).
+- `-reconnect`: reconnect delay after a link failure (default `750ms`).
 - `-keyboard`: forward keyboard events (default `true`).
-- `-toggle`: remote mode hotkey combo (default `F9`).
-- `-auto-switch`: automatically jump to remote device when mouse moved to edge of screens (default `true`).
-- `-gui`: launch native GUI (`true`) or CLI (`false`).
-
-## Serial Protocol
-
-Commands are newline-delimited UTF-8 text.
-
-Supported commands:
-
-- `MOVE dx dy`
-- `MOUSEDOWN LEFT|RIGHT|MIDDLE`
-- `MOUSEUP LEFT|RIGHT|MIDDLE`
-- `CLICK LEFT|RIGHT|MIDDLE`
-- `SCROLL amount`
-- `KEYDOWN code`
-- `KEYUP code`
-- `KEYRELEASE`
-- `RELEASE`
-
-Notes:
-
-- HID deltas are chunked to int8 range (`-127..127`) by firmware.
-- Oversized serial lines are dropped safely until newline resync.
-
-## End-to-End Quick Start
-
-1. Flash firmware to ESP32.
-2. Pair target phone/tablet with BLE device `PC Bridge Combo`.
-3. Connect ESP32 to Windows via USB.
-4. Run sender app on Windows.
-5. In GUI, click `Start` and confirm Bridge status becomes connected.
-6. Use hotkey/edge to enter remote mode and control the paired device.
-
-## Development (Optional)
-
-From `software/` with Air:
-
-```powershell
-go install github.com/air-verse/air@latest
-air -c .air.toml
-```
+- `-toggle`: remote-mode hotkey combo (default `F9`).
+- `-auto-switch`: enter remote mode at the screen edge (default `true`).
+- `-gui`: launch the GUI (default `true`).
+- `-cli`: diagnostics only, no input capture (implies `-gui=false`).
 
 ## Troubleshooting
 
-- Bridge never reaches connected:
-	- verify ESP32 firmware is running and USB cable supports data.
-	- try `-port auto` or explicitly set `-port COMx`.
-- BLE control not working after firmware changes:
-	- remove old Bluetooth pairing and pair again.
-- Hotkey does nothing:
-	- expected when serial connection is down; reconnect first.
+- **The bridge never connects.** Check that the board is running v2 firmware
+  and that the USB cable carries data. `-cli` prints what the device reports.
+- **The phone cannot see the device.** Use **Clear device bonds** in the app,
+  then forget `ESP-HID-ME` on the phone and pair again.
+- **The hotkey does nothing.** Expected while the link is down — that is the
+  safety interlock. Reconnect first.
+- **macOS: the mouse works but typing does not.** Either Input Monitoring is
+  not granted, or another app has Secure Event Input enabled (a focused
+  password field or a `sudo` prompt). The app reports both cases.
+- **macOS: permissions stop working after an update.** The release build is
+  ad-hoc signed, so its identity changes with each version. Re-grant, or see
+  the `tccutil` reset commands in [`host/README.md`](host/README.md).
 
 ---
 
-**Note**: This project was developed for my personal requirements and may not be optimum for everyone's needs. Feel free to modify it for your own requirements.
-
+**Note**: This project was developed for my personal requirements and may not
+be optimum for everyone's needs. Feel free to modify it for your own
+requirements.

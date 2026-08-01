@@ -9,3 +9,8 @@ host/cmd/bridge/rsrc_windows_*.syso
 /firmware-idf/sdkconfig
 /firmware-idf/sdkconfig.old
 /firmware-idf/tools/.venv
+# macOS host build output (build-macos.sh). The legacy software-macos/ once
+# had two 29 MB binaries committed for want of these rules.
+/host/build
+/host/dist
+*.app

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>ESP HID Bridge</string>
+	<key>CFBundleDisplayName</key>
+	<string>ESP HID Bridge</string>
+	<!-- Stable and never to be changed: macOS keys Accessibility and Input
+	     Monitoring grants on the bundle identifier, so renaming it makes
+	     every user re-grant permission. -->
+	<key>CFBundleIdentifier</key>
+	<string>@BUNDLE_ID@</string>
+	<key>CFBundleExecutable</key>
+	<string>esp-hid-bridge</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@SHORT_VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@SHORT_VERSION@</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<!-- Required for AppKit to initialise a bundled app. -->
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<!-- Without this the entire UI renders at 1x and looks blurry on Retina. -->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- CGRequestListenEventAccess needs 10.15; SF Symbols need 11. -->
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>ESP HID Bridge</string>
+	<!-- Note: there is deliberately no NSAccessibilityUsageDescription or
+	     NSInputMonitoringUsageDescription. Those keys do not exist on macOS;
+	     both prompts use fixed system-supplied text. -->
+</dict>
+</plist>
