@@ -87,14 +87,28 @@ Two macOS behaviours worth knowing:
   event tap while any app has a password field focused. The mouse keeps
   working and typing stops; the app detects this and says so.
 
-### Gatekeeper
+### Gatekeeper: "Apple could not verify…"
 
 The released `.app` is ad-hoc signed but not notarized, so a copy downloaded
-through a browser is quarantined. Either right-click → **Open** once, or:
+through a browser is quarantined and macOS refuses to open it, offering only
+**Done** and **Move to Bin**.
+
+The reliable fix is to strip the quarantine attribute:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/ESP HID Bridge.app"
+xattr -dr com.apple.quarantine ~/Downloads/"ESP HID Bridge.app"
 ```
+
+Alternatively, after being blocked once, go to **System Settings → Privacy &
+Security**, scroll to the Security section, and click **Open Anyway**.
+
+> Right-clicking the app and choosing **Open** used to bypass this. That
+> escape hatch was removed in macOS 15, so on macOS 15 and later it does
+> nothing for this dialog — use one of the two methods above.
+
+Removing quarantine does not weaken the signature; `codesign --verify`
+still passes afterwards. The only way to avoid the prompt entirely is a paid
+Apple Developer ID plus notarization, which this project does not use.
 
 ## Test
 

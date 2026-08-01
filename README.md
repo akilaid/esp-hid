@@ -133,6 +133,12 @@ Both platforms accept the same flags.
 - **macOS: the mouse works but typing does not.** Either Input Monitoring is
   not granted, or another app has Secure Event Input enabled (a focused
   password field or a `sudo` prompt). The app reports both cases.
+- **macOS: "Apple could not verify ESP HID Bridge…"** on first launch. The
+  download is quarantined because the build is ad-hoc signed rather than
+  notarized. Run
+  `xattr -dr com.apple.quarantine ~/Downloads/"ESP HID Bridge.app"`, or open
+  **System Settings → Privacy & Security** and click **Open Anyway**.
+  (Right-click → Open no longer works on macOS 15+.)
 - **macOS: permissions stop working after an update.** The release build is
   ad-hoc signed, so its identity changes with each version. Re-grant, or see
   the `tccutil` reset commands in [`host/README.md`](host/README.md).
