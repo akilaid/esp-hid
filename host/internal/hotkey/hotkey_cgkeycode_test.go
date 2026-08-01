@@ -1,6 +1,7 @@
 package hotkey
 
 import (
+	"fmt"
 	"testing"
 
 	"esp-hid/host/internal/keymap"
@@ -40,12 +41,63 @@ func TestCGKeyCodesAreKnownToKeymap(t *testing.T) {
 }
 
 func TestCGKeyCodesAreUnique(t *testing.T) {
+	// Print Screen and F13 are the same physical key on an Apple extended
+	// keyboard, so they share a code on purpose. Everything else colliding
+	// would be a transcription mistake.
+	allowedAliases := map[uint32]uint32{VKSnapshot: VKF1 + 12}
+
 	seen := map[uint32]uint32{}
 	for vk, cgKeyCode := range vkToCGKey {
-		if prev, dup := seen[cgKeyCode]; dup {
+		prev, dup := seen[cgKeyCode]
+		if dup && allowedAliases[vk] != prev && allowedAliases[prev] != vk {
 			t.Errorf("macOS code 0x%02X claimed by both VK 0x%02X and VK 0x%02X", cgKeyCode, prev, vk)
 		}
 		seen[cgKeyCode] = vk
+	}
+}
+
+func TestFunctionKeysUpToF20AreBindable(t *testing.T) {
+	// F13..F20 exist on full-size Apple keyboards and must be usable as the
+	// toggle, F19 among them.
+	for n := 1; n <= 20; n++ {
+		name := fmt.Sprintf("F%d", n)
+		vk, mods := Parse(name)
+		if vk == 0 {
+			t.Errorf("%s did not parse", name)
+			continue
+		}
+		if mods != 0 {
+			t.Errorf("%s parsed with unexpected modifiers %d", name, mods)
+		}
+		if got := Format(vk, mods); got != name {
+			t.Errorf("Format(Parse(%q)) = %q", name, got)
+		}
+		cgKeyCode, ok := CGKeyCodeFor(vk)
+		if !ok {
+			t.Errorf("%s has no macOS key code", name)
+			continue
+		}
+		if _, known := keymap.CGKeyCodeToUsage(cgKeyCode); !known {
+			t.Errorf("%s maps to macOS code 0x%02X, which keymap does not know", name, cgKeyCode)
+		}
+	}
+	// Macs stop at F20, so the grammar does too rather than accepting a
+	// combo that could never fire there.
+	for _, name := range []string{"F21", "F24", "F25"} {
+		if vk, _ := Parse(name); vk != 0 {
+			t.Errorf("%s should not be bindable (no macOS equivalent)", name)
+		}
+	}
+}
+
+func TestF19SpecificallyResolves(t *testing.T) {
+	cgKeyCode, mods := ParseDarwin("F19")
+	if cgKeyCode != 0x50 || mods != 0 {
+		t.Errorf("ParseDarwin(\"F19\") = (0x%02X, %d), want (0x50, 0)", cgKeyCode, mods)
+	}
+	usage, ok := keymap.CGKeyCodeToUsage(cgKeyCode)
+	if !ok || usage != 0x6E {
+		t.Errorf("F19 usage = 0x%02X ok=%v, want 0x6E", usage, ok)
 	}
 }
 

@@ -17,8 +17,79 @@ import (
 // macOS key codes used by the test.
 const (
 	testKeyF9        = 0x65
+	testKeyF19       = 0x50
 	testKeyLeftShift = 0x38
 )
+
+// TestIntegrationF19Toggle checks a function key above F12 works as the
+// toggle. F13..F20 exist on full-size Apple keyboards but the combo grammar
+// used to stop at F12, so binding F19 silently fell back to the default.
+//
+// Note this has to drive the tap from inside the test process: macOS only
+// lets a process post synthetic *keystrokes* if it is itself trusted, so a
+// separate helper binary cannot stand in here (synthetic mouse events are
+// not restricted the same way).
+func TestIntegrationF19Toggle(t *testing.T) {
+	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
+		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
+	}
+	if perms := CheckPermissions(); !perms.OK(true) {
+		t.Skipf("missing permissions: %s", perms.PermissionHint(true))
+	}
+
+	events := make(chan Event, 256)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Options{
+			CaptureKeyboard: true,
+			ToggleHotkey:    "F19",
+			SlaveWidth:      1920,
+			SlaveHeight:     1080,
+			HostSide:        HostSideLeft,
+			AutoSwitch:      false,
+		}, events, func() bool { return true })
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	syntheticKey(testKeyF19, true)
+	syntheticKey(testKeyF19, false)
+	time.Sleep(300 * time.Millisecond)
+	syntheticKey(testKeyF19, true)
+	syntheticKey(testKeyF19, false)
+	time.Sleep(300 * time.Millisecond)
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+	close(events)
+
+	var on, off bool
+	for event := range events {
+		if event.Kind != EventRemoteMode || event.Source != "hotkey" {
+			continue
+		}
+		if event.Active {
+			on = true
+		} else if on {
+			off = true
+		}
+	}
+	if !on {
+		t.Error("F19 did not activate remote mode")
+	}
+	if !off {
+		t.Error("a second F19 press did not deactivate remote mode")
+	}
+}
 
 // TestIntegrationEdgeEntryPersists checks that reaching the host-side screen
 // edge activates remote mode and that it stays activated.

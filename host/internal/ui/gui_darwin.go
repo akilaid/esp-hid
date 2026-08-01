@@ -77,7 +77,7 @@ func Run(cfg config.Config) error {
 	cHotkey := C.CString(values.ToggleHotkey)
 	cResolution := C.CString(values.Resolution)
 	C.ehbGuiSetForm(cHotkey, C.int(cfg.MoveRateHz), cBool(cfg.CaptureKeyboard),
-		cBool(cfg.AutoSwitch), cResolution, C.int(values.HostSideIndex))
+		cResolution, C.int(values.HostSideIndex))
 	C.free(unsafe.Pointer(cHotkey))
 	C.free(unsafe.Pointer(cResolution))
 
@@ -205,7 +205,11 @@ func (g *darwinGUI) readConfigFromForm() error {
 		Resolution:      C.GoString(&form.resolution[0]),
 		HostSideIndex:   int(form.hostSideIndex),
 		CaptureKeyboard: form.captureKeyboard != 0,
-		AutoSwitch:      form.autoSwitch != 0,
+		// Hotkey-only on macOS. Edge switching is not offered here, so this
+		// is pinned off rather than read from a control that does not exist
+		// — otherwise a value persisted on Windows, or from an older build,
+		// would quietly switch it back on.
+		AutoSwitch: false,
 	}
 	return values.Apply(&g.cfg)
 }

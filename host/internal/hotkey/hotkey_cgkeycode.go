@@ -33,6 +33,11 @@ var vkToCGKey = map[uint32]uint32{
 	VKF1 + 4: 0x60, VKF1 + 5: 0x61, VKF1 + 6: 0x62, VKF1 + 7: 0x64,
 	VKF1 + 8: 0x65, VKF1 + 9: 0x6D, VKF1 + 10: 0x67, VKF1 + 11: 0x6F,
 
+	// F13..F20, present on full-size Apple keyboards. Macs have nothing
+	// above F20, which is where the grammar stops.
+	VKF1 + 12: 0x69, VKF1 + 13: 0x6B, VKF1 + 14: 0x71, VKF1 + 15: 0x6A,
+	VKF1 + 16: 0x40, VKF1 + 17: 0x4F, VKF1 + 18: 0x50, VKF1 + 19: 0x5A,
+
 	// Keypad digits.
 	VKNumpad0: 0x52, VKNumpad0 + 1: 0x53, VKNumpad0 + 2: 0x54, VKNumpad0 + 3: 0x55,
 	VKNumpad0 + 4: 0x56, VKNumpad0 + 5: 0x57, VKNumpad0 + 6: 0x58, VKNumpad0 + 7: 0x59,
@@ -53,10 +58,11 @@ var vkToCGKey = map[uint32]uint32{
 	VKPrior:  0x74,
 	VKNext:   0x79,
 
-	// Macs have no Print Screen key; F13 sits in that position on Apple
-	// extended keyboards. Aliasing it keeps a settings file written on
-	// Windows working after it is copied to a Mac. Parse never produces F13
-	// by name, so nothing else can collide with this.
+	// Macs have no Print Screen key; F13 sits in exactly that position on
+	// Apple extended keyboards. Aliasing the two keeps a settings file
+	// written on Windows working after it is copied to a Mac. This is the
+	// one intentional duplicate in this table — "Print Screen" and "F13"
+	// name the same physical key here.
 	VKSnapshot: 0x69,
 }
 

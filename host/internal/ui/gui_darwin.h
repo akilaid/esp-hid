@@ -15,12 +15,13 @@
 
 // Snapshot of the settings form. Fixed-size buffers so it can be returned by
 // value with no allocation on either side.
+// There is no autoSwitch field: switching to the device is hotkey-only on
+// macOS, so the GUI does not offer edge switching at all.
 typedef struct {
   char hotkey[64];
   char resolution[32];
   int rateHz;
   int captureKeyboard;
-  int autoSwitch;
   int hostSideIndex;
 } EhbForm;
 
@@ -38,7 +39,7 @@ void ehbGuiTerminate(void);
 void ehbGuiAddResolution(const char *value);
 void ehbGuiAddHostSide(const char *value);
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
-                   int autoSwitch, const char *resolution, int hostSideIndex);
+                   const char *resolution, int hostSideIndex);
 EhbForm ehbGuiReadForm(void);
 
 // --- Updating the display ------------------------------------------------

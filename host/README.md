@@ -16,6 +16,8 @@ What's new over the legacy `software/` and `software-macos/`:
 - Remote mode requires serial **and** BLE connected; it force-exits if
   either drops (you can't get trapped controlling an unreachable device).
 - Middle/back/forward mouse buttons and horizontal scroll now forwarded.
+- Toggle hotkeys cover `F1`–`F20`, so the extra function keys on a full-size
+  Apple keyboard are bindable.
 - Settings survive schema growth (`settings-v2.json`).
 - **One macOS app that speaks the v2 protocol.** The old `software-macos/`
   spoke the retired newline-text protocol and could not talk to
@@ -62,6 +64,19 @@ artwork.
 Or download from GitHub Releases (built by
 `.github/workflows/release-v2.yml`, manual dispatch): `esp-hid-bridge.exe`
 for Windows, `ESP-HID-Bridge-<version>.dmg` for macOS.
+
+## Switching, on macOS
+
+The macOS GUI is **hotkey-only**: there is no Auto/Manual choice, because
+entering remote mode by nudging the cursor into a screen edge is easy to
+trigger by accident on a single-display Mac. Returning is still automatic —
+push the pointer past the far edge of the device's screen and it comes back.
+
+The edge-entry code is shared with Windows and still works; it is simply not
+offered in the GUI. `-auto-switch=true` enables it for anyone who wants it,
+in which case **Device resolution** and **This Mac sits** decide which border
+is the crossing point. Those two settings matter either way, since they also
+drive the automatic return.
 
 ## macOS permissions
 

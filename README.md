@@ -61,9 +61,9 @@ Changing a message means changing all of them.
    into Applications; on Windows, download `esp-hid-bridge.exe`. See
    [`host/README.md`](host/README.md) for building from source and, on
    macOS, the permissions and Gatekeeper steps the first launch needs.
-5. Press the toggle hotkey (`F9` by default), or push the cursor into the
-   screen edge, and your input goes to the phone. Press it again to come
-   back.
+5. Press the toggle hotkey (`F9` by default) and your input goes to the
+   phone. Press it again to come back. On Windows you can also push the
+   cursor into the screen edge.
 
 ## Requirements
 
@@ -79,13 +79,17 @@ you through granting.
 
 ## Remote mode
 
-- **Auto** switching activates remote mode when the cursor reaches the
-  host-side edge of your desktop. Seams between multiple monitors never
-  trigger it — only the true outer boundary does.
-- **Manual** switching uses the hotkey only.
-- Coming back works by hotkey, by pushing the cursor against the far edge of
-  the device's screen, or optionally by a deliberate left-swipe
-  (`-leftreturn`).
+- **Switching to the device** is done with the toggle hotkey. Any single key
+  or combination works — `F9` by default, through to `F20`, letters, digits,
+  the keypad, and navigation keys, with any of Ctrl/Alt/Shift/Cmd.
+- **On Windows** there is also **Auto** switching, which activates remote
+  mode when the cursor reaches the host-side edge of your desktop. Seams
+  between multiple monitors never trigger it — only the true outer boundary
+  does. The macOS app is hotkey-only and does not offer this; the
+  `-auto-switch` flag still enables it there for anyone who wants it.
+- **Coming back** works by hotkey, by pushing the cursor against the far edge
+  of the device's screen, or optionally by a deliberate left-swipe
+  (`-leftreturn`). This is automatic on both platforms.
 - Remote mode requires the serial link **and** a connected Bluetooth host. If
   either drops, remote mode exits, the cursor is restored, and all keys and
   buttons are released. The hotkey is deliberately inert while the link is
@@ -120,8 +124,11 @@ Both platforms accept the same flags.
 - `-leftreturn`: allow returning by a quick left-swipe (default `false`).
 - `-reconnect`: reconnect delay after a link failure (default `750ms`).
 - `-keyboard`: forward keyboard events (default `true`).
-- `-toggle`: remote-mode hotkey combo (default `F9`).
-- `-auto-switch`: enter remote mode at the screen edge (default `true`).
+- `-toggle`: remote-mode hotkey combo (default `F9`). Accepts `F1`–`F20`,
+  `A`–`Z`, `0`–`9`, keypad keys, and navigation keys, optionally prefixed
+  with `Ctrl+`, `Alt+`, `Shift+` and `Win+`/`Cmd+`.
+- `-auto-switch`: enter remote mode at the screen edge (default `true`;
+  the macOS GUI does not offer it and leaves it off).
 - `-gui`: launch the GUI (default `true`).
 - `-cli`: diagnostics only, no input capture (implies `-gui=false`).
 
