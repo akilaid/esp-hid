@@ -503,11 +503,16 @@ func (s *session) setRemoteMode(active bool, source string) {
 	}
 	s.remoteModeActive = active
 	if active {
-		// Park the pointer, then re-associate to cancel the roughly
-		// quarter-second event suppression a warp triggers, then decouple it
-		// so motion keeps arriving as deltas while the cursor stays put.
-		C.ehbWarpCursor(C.double(s.remoteAnchor.X), C.double(s.remoteAnchor.Y))
-		C.ehbSetMouseAssociation(1)
+		// Decouple the cursor from the mouse so motion keeps arriving as
+		// deltas while the pointer itself stays put.
+		//
+		// Deliberately no warp here. A warp emits a motion event whose delta
+		// is the size of the jump, and entering from a screen edge that jump
+		// points straight back at the edge you just crossed — enough to trip
+		// the return-pressure model on the very next event, so remote mode
+		// switched on and off again within milliseconds. Nothing needs the
+		// warp: the cursor is hidden for the duration and is repositioned
+		// explicitly on exit.
 		C.ehbSetMouseAssociation(0)
 		if !s.cursorHidden {
 			C.ehbHideCursorAllDisplays()

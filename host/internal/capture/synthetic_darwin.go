@@ -32,6 +32,17 @@ static void ehbTestPostMouseMove(int dx, int dy) {
   CFRelease(event);
 }
 
+// Absolute variant, for driving the cursor onto a screen edge where the
+// capture layer reads the location rather than the delta.
+static void ehbTestPostMouseMoveTo(double x, double y, int dx) {
+  CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
+                                             CGPointMake(x, y), kCGMouseButtonLeft);
+  if (!event) return;
+  CGEventSetIntegerValueField(event, kCGMouseEventDeltaX, dx);
+  CGEventPost(kCGHIDEventTap, event);
+  CFRelease(event);
+}
+
 static void ehbTestPostButton(int eventType, int buttonNumber) {
   CGEventRef event = CGEventCreateMouseEvent(NULL, (CGEventType)eventType,
                                              CGPointMake(300, 300), (CGMouseButton)buttonNumber);
@@ -77,6 +88,10 @@ func syntheticKey(keyCode int, down bool) {
 
 func syntheticMouseMove(dx, dy int) {
 	C.ehbTestPostMouseMove(C.int(dx), C.int(dy))
+}
+
+func syntheticMouseMoveTo(x, y float64, dx int) {
+	C.ehbTestPostMouseMoveTo(C.double(x), C.double(y), C.int(dx))
 }
 
 func syntheticLeftButton(down bool) {

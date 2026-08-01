@@ -20,6 +20,91 @@ const (
 	testKeyLeftShift = 0x38
 )
 
+// TestIntegrationEdgeEntryPersists checks that reaching the host-side screen
+// edge activates remote mode and that it stays activated.
+//
+// Motivation: entering remote mode used to warp the cursor to the middle of
+// the monitor, and a warp emits a motion event whose delta is the size of the
+// jump. Coming in from a screen edge, that jump points straight back at the
+// edge just crossed — enough to trip the return-pressure model immediately, so
+// remote mode switched on and back off within milliseconds and edge switching
+// appeared not to work at all.
+//
+// Honest limitation: this test does NOT reproduce that bug. Re-introducing the
+// warp leaves it passing, because a single synthetic absolute-position event
+// does not put the window server in the same state a real mouse sweep does;
+// the fault was found and confirmed by driving the built binary by hand. What
+// this test does buy is a guard against edge entry breaking outright, or
+// against it bouncing straight back out for some other reason.
+//
+// Host side "right" is used because it puts the entry edge at x<=1, which is
+// reachable regardless of display resolution.
+func TestIntegrationEdgeEntryPersists(t *testing.T) {
+	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
+		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
+	}
+	if perms := CheckPermissions(); !perms.OK(true) {
+		t.Skipf("missing permissions: %s", perms.PermissionHint(true))
+	}
+
+	events := make(chan Event, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Options{
+			CaptureKeyboard: true,
+			ToggleHotkey:    "F9",
+			SlaveWidth:      1080,
+			SlaveHeight:     1920,
+			HostSide:        HostSideRight,
+			AutoSwitch:      true,
+		}, events, func() bool { return true })
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	// Sweep leftward into the entry edge.
+	syntheticMouseMove(-5, 0)
+	time.Sleep(100 * time.Millisecond)
+	syntheticMouseMoveTo(0, 400, -40)
+	// Hold: any spurious motion in this window would trip the return.
+	time.Sleep(1200 * time.Millisecond)
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+	close(events)
+
+	var activatedAt, deactivatedAt int = -1, -1
+	index := 0
+	for event := range events {
+		if event.Kind == EventRemoteMode {
+			if event.Active && activatedAt < 0 && event.Source == "edge" {
+				activatedAt = index
+			} else if !event.Active && activatedAt >= 0 && deactivatedAt < 0 {
+				deactivatedAt = index
+			}
+		}
+		index++
+	}
+
+	if activatedAt < 0 {
+		t.Fatal("reaching the host-side edge did not activate remote mode")
+	}
+	if deactivatedAt >= 0 {
+		t.Errorf("remote mode deactivated on its own %d events after entry; "+
+			"entering must not emit motion that trips the return-pressure model",
+			deactivatedAt-activatedAt)
+	}
+}
+
 // TestIntegrationCaptureForwardsRealEvents drives the real system event tap.
 // It needs Accessibility and Input Monitoring, and it *swallows the machine's
 // input* for the second or so that remote mode is engaged — unacceptable in
