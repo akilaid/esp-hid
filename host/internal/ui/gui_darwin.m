@@ -200,21 +200,31 @@ static void buildMenuBar(void) {
   [editItem setSubmenu:editMenu];
 }
 
+// YES while the menu bar is showing SF Symbols rather than bundled art. Only
+// a template image responds to a tint, so the remote-mode tint below is
+// applied only in that case.
+static BOOL gIconsAreTemplate = NO;
+
 // name is a bundled PNG; fallbackSymbol is the SF Symbol to use when it is
-// missing. The art must be a black-on-transparent glyph: setTemplate: means
-// macOS uses the alpha channel alone and fills the silhouette, so a full-bleed
-// app icon comes out as a solid block rather than a picture.
+// missing.
+//
+// Bundled art is rendered in colour, deliberately not as a template. A
+// template image is drawn from its alpha channel alone, which throws the
+// colour away — and the two glyphs here differ only by the colour of their
+// status dot, so as templates they would be indistinguishable. The trade is
+// that the art has to be legible on both light and dark menu bars by itself,
+// which a mid-grey outline with a saturated dot is.
 static NSImage *loadStatusImage(NSString *name, NSString *fallbackSymbol) {
   NSString *path = [[NSBundle mainBundle] pathForResource:name ofType:@"png"];
   if (path) {
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:path];
     if (image) {
       [image setSize:NSMakeSize(18, 18)];
-      // Template images adapt to light and dark menu bars automatically.
-      [image setTemplate:YES];
+      [image setTemplate:NO];
       return image;
     }
   }
+  gIconsAreTemplate = YES;
   // No bundled art — either the bare binary is being run rather than the .app,
   // or no glyph has been drawn yet. A system symbol is a real template image,
   // so this looks native rather than wrong.
@@ -435,13 +445,14 @@ void ehbGuiSetRemoteActive(int active) {
   if (image) {
     [[gStatusItem button] setImage:image];
   }
-  // Template rendering throws colour away and paints the alpha silhouette as a
-  // flat fill, so idle and active art can only differ in *shape*. A tint is the
-  // second cue, and the one that still works if both glyphs are identical — as
-  // they are when the SF Symbol fallback is in use. Accent colour rather than a
-  // fixed one, to match how the system's own menu bar items signal activity.
-  [[gStatusItem button]
-      setContentTintColor:active ? [NSColor controlAccentColor] : nil];
+  // The bundled art carries the state in its own colours. The SF Symbol
+  // fallback cannot — a template image is drawn from its alpha channel alone —
+  // so in that case tint it instead, the way the system's own menu bar items
+  // signal activity.
+  if (gIconsAreTemplate) {
+    [[gStatusItem button]
+        setContentTintColor:active ? [NSColor controlAccentColor] : nil];
+  }
   [[gStatusItem button]
       setToolTip:active ? @"ESP HID Bridge — input going to the device"
                         : @"ESP HID Bridge"];

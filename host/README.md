@@ -104,27 +104,33 @@ refuse activation from a background app, even one ordering a window front.
 
 ## macOS icons
 
-The menu bar item renders its image as a **template**: macOS throws the colour
-away and fills the alpha silhouette flat, so the art must be a black glyph on a
-transparent background. Feeding it a full-bleed app icon produces a solid
-rounded block, not a picture.
-
-| File | Size | Notes |
+| File | Size | Role |
 |---|---|---|
-| `packaging/macos/status-idle.png` | 18×18 px | black on transparent |
-| `packaging/macos/status-idle@2x.png` | 36×36 px | |
-| `packaging/macos/status-active.png` | 18×18 px | must differ in **shape**, not colour |
-| `packaging/macos/status-active@2x.png` | 36×36 px | |
-| `packaging/macos/appicon.png` | 1024×1024 px | full colour; body 824×824, radius ≈185, centred |
+| `off.png` | ≥36×36 px | menu bar, idle |
+| `on.png` | ≥36×36 px | menu bar, remote mode active |
+| `packaging/macos/appicon.png` | 1024×1024 px | Dock and Finder |
 
-Keep the glyph inside roughly the middle 16×16 of the 18 px canvas. Since
-template rendering discards colour, remote mode is also signalled by tinting the
-item with the user's accent colour.
+`build-macos.sh` scales the menu bar pair to 18 px and 36 px (@2x) itself, so
+draw them at whatever size you like above 36 and let it downscale.
 
-All of these are optional. Without `appicon.png` the build falls back to
-`app.ico`, which tops out at 512×512 and so gets upscaled. Without the status
-art it falls back to SF Symbols, which are proper template images — a better
-default than wrong art, so `build-macos.sh` prints a note rather than failing.
+The menu bar images are shown **in colour**, deliberately not as templates. A
+template image is drawn from its alpha channel alone — macOS discards the colour
+and fills the silhouette flat — which is why an earlier build that scaled
+`app.ico` down to 18 px produced a solid white block. It also means two glyphs
+that differ only in colour become identical, which is exactly how `off.png` and
+`on.png` differ. The cost of showing them in colour is that they have to be
+legible on light *and* dark menu bars unaided; a mid-grey outline with a
+saturated status dot is.
+
+If you would rather have template rendering — automatic light/dark adaptation,
+in exchange for colour — draw the two states as different *shapes* and flip
+`setTemplate:` in `loadStatusImage()`.
+
+Both are optional. Without `appicon.png` the build falls back to `app.ico`,
+which tops out at 512×512 and so gets upscaled. Without the menu bar pair it
+falls back to SF Symbols, which are proper template images and are tinted with
+the accent colour while remote mode is active — a better default than wrong
+art, so `build-macos.sh` prints a note rather than failing.
 
 ## macOS permissions
 

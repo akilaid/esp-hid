@@ -93,26 +93,25 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
-# Menu-bar images: one for idle, one shown while remote mode is active.
+# Menu-bar images: off.png when idle, on.png while remote mode is active.
 #
-# These are copied, never derived from the .ico files. The status item renders
-# them as *template* images, which means macOS discards the colour and fills
-# the alpha silhouette flat — so a full-bleed app icon comes out as a solid
-# rounded block, which is exactly what shipping the scaled-down app.ico did.
-# The art has to be a black-on-transparent glyph, so it is drawn by hand.
+# Purpose-drawn PNGs with a transparent background, never the .ico files. The
+# status item used to scale app.ico down to 18px and render it as a template
+# image, which draws the alpha silhouette as a flat fill — and since that icon
+# is a full-bleed rounded square, it came out as a solid white block.
 #
-# When no art is present the app falls back to an SF Symbol, which is a real
-# template image and looks native. That is a better default than a block, so
-# missing art is deliberately not an error.
-status_art_found=0
-for image in status-idle status-idle@2x status-active status-active@2x; do
-  if [ -f "packaging/macos/$image.png" ]; then
-    cp "packaging/macos/$image.png" "$APP_DIR/Contents/Resources/$image.png"
-    status_art_found=1
-  fi
-done
-if [ "$status_art_found" -eq 0 ]; then
-  echo "  note: no packaging/macos/status-*.png; using the SF Symbol fallback"
+# These are shown in colour rather than as templates, because the two states
+# differ only by the colour of the status dot. See loadStatusImage().
+#
+# When the art is missing the app falls back to an SF Symbol, which is a real
+# template image and looks native, so this is deliberately not an error.
+if [ -f off.png ] && [ -f on.png ]; then
+  sips -s format png -Z 18 off.png --out "$APP_DIR/Contents/Resources/status-idle.png" >/dev/null
+  sips -s format png -Z 36 off.png --out "$APP_DIR/Contents/Resources/status-idle@2x.png" >/dev/null
+  sips -s format png -Z 18 on.png --out "$APP_DIR/Contents/Resources/status-active.png" >/dev/null
+  sips -s format png -Z 36 on.png --out "$APP_DIR/Contents/Resources/status-active@2x.png" >/dev/null
+else
+  echo "  note: off.png/on.png missing; using the SF Symbol fallback"
 fi
 
 echo "  signing (ad-hoc)"
