@@ -200,7 +200,11 @@ static void buildMenuBar(void) {
   [editItem setSubmenu:editMenu];
 }
 
-static NSImage *loadStatusImage(NSString *name) {
+// name is a bundled PNG; fallbackSymbol is the SF Symbol to use when it is
+// missing. The art must be a black-on-transparent glyph: setTemplate: means
+// macOS uses the alpha channel alone and fills the silhouette, so a full-bleed
+// app icon comes out as a solid block rather than a picture.
+static NSImage *loadStatusImage(NSString *name, NSString *fallbackSymbol) {
   NSString *path = [[NSBundle mainBundle] pathForResource:name ofType:@"png"];
   if (path) {
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:path];
@@ -211,10 +215,11 @@ static NSImage *loadStatusImage(NSString *name) {
       return image;
     }
   }
-  // Running the bare binary rather than the .app bundle: fall back to a
-  // system symbol so the menu bar item is still visible.
+  // No bundled art — either the bare binary is being run rather than the .app,
+  // or no glyph has been drawn yet. A system symbol is a real template image,
+  // so this looks native rather than wrong.
   if (@available(macOS 11.0, *)) {
-    return [NSImage imageWithSystemSymbolName:@"dot.radiowaves.left.and.right"
+    return [NSImage imageWithSystemSymbolName:fallbackSymbol
                      accessibilityDescription:@"ESP HID Bridge"];
   }
   return nil;
@@ -223,8 +228,9 @@ static NSImage *loadStatusImage(NSString *name) {
 static void buildStatusItem(void) {
   gStatusItem = [[NSStatusBar systemStatusBar]
       statusItemWithLength:NSSquareStatusItemLength];
-  gIconIdle = loadStatusImage(@"status-idle");
-  gIconActive = loadStatusImage(@"status-active");
+  gIconIdle = loadStatusImage(@"status-idle", @"dot.radiowaves.left.and.right");
+  gIconActive =
+      loadStatusImage(@"status-active", @"antenna.radiowaves.left.and.right");
   if (gIconIdle) {
     [[gStatusItem button] setImage:gIconIdle];
   } else {
@@ -429,6 +435,13 @@ void ehbGuiSetRemoteActive(int active) {
   if (image) {
     [[gStatusItem button] setImage:image];
   }
+  // Template rendering throws colour away and paints the alpha silhouette as a
+  // flat fill, so idle and active art can only differ in *shape*. A tint is the
+  // second cue, and the one that still works if both glyphs are identical — as
+  // they are when the SF Symbol fallback is in use. Accent colour rather than a
+  // fixed one, to match how the system's own menu bar items signal activity.
+  [[gStatusItem button]
+      setContentTintColor:active ? [NSColor controlAccentColor] : nil];
   [[gStatusItem button]
       setToolTip:active ? @"ESP HID Bridge — input going to the device"
                         : @"ESP HID Bridge"];

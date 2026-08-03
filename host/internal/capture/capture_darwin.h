@@ -72,12 +72,37 @@ void ehbWarpCursor(double x, double y);
 // Decoupling the cursor from the hardware is what makes relative capture
 // work without warping on every event.
 void ehbSetMouseAssociation(int associated);
-void ehbHideCursorAllDisplays(void);
-void ehbShowCursorAllDisplays(void);
+// Idempotent, and display-count independent: CGDisplayHideCursor ignores its
+// display argument and keeps one hide count per window server connection.
+void ehbHideCursor(void);
+void ehbShowCursor(void);
 void ehbCursorPosition(double *x, double *y);
 uint64_t ehbCurrentFlags(void);
 // Fills out with {x, y, w, h} per display; returns the number written.
 int ehbDisplayBounds(double *out, int maxCount);
+
+// --- Foreground -----------------------------------------------------------
+
+// Both cursor dissociation and cursor hiding are honoured only while this
+// process is the *frontmost application* — CGRemoteOperation.h says so
+// outright: "Connect or disconnect the mouse and cursor while an application
+// is in the foreground." Minimize the window, or just click another app, and
+// the window server quietly starts moving and drawing the pointer again even
+// though the session tap keeps capturing. So remote mode has to hold the
+// foreground for its duration.
+//
+// Both return immediately, queueing the slow part onto a serial queue: they
+// are called from the tap callback, which must never block.
+//
+// Call ehbFocusRelease *before* ehbSetMouseAssociation(1), not after. The one
+// thing it does synchronously is cancel any in-flight grab, and a grab still
+// waiting for activation to land would otherwise re-dissociate the mouse just
+// after remote mode re-associated it — leaving a pointer that does not move.
+//
+// Implemented in capture_darwin_focus.m, the one place this package touches
+// AppKit.
+void ehbFocusGrab(void);
+void ehbFocusRelease(void);
 
 // --- Permissions ---------------------------------------------------------
 

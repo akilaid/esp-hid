@@ -23,7 +23,10 @@ package capture
 
 /*
 #cgo CFLAGS: -Wall
-#cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation -framework CoreGraphics -framework Carbon
+// AppKit is here only for capture_darwin_focus.m, which needs
+// NSRunningApplication to hold the foreground while remote mode is engaged.
+// It builds no UI; the AppKit that draws things stays in internal/ui.
+#cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation -framework CoreGraphics -framework Carbon -framework AppKit
 #include "capture_darwin.h"
 */
 import "C"
@@ -515,17 +518,28 @@ func (s *session) setRemoteMode(active bool, source string) {
 		// explicitly on exit.
 		C.ehbSetMouseAssociation(0)
 		if !s.cursorHidden {
-			C.ehbHideCursorAllDisplays()
+			C.ehbHideCursor()
 			s.cursorHidden = true
 		}
+		// Neither of the two calls above is honoured unless this process is the
+		// frontmost application, so take the foreground for the duration. It
+		// returns immediately and re-asserts the dissociation once activation
+		// has actually landed; nothing here may block the tap callback.
+		C.ehbFocusGrab()
 		// Seed the shadow without emitting: the toggle hotkey itself often
 		// holds modifiers, and pressing Ctrl+Alt+F7 to enter must not send
 		// Ctrl and Alt to the slave. The later release produces an "up" for a
 		// key never marked down, which core.KeyTracker filters out.
 		s.reconcileModifiers(uint64(C.ehbCurrentFlags()), 0, false)
 	} else {
+		// First, and before the re-association below. The generation bump
+		// inside is synchronous, which is the point: a grab still polling for
+		// activation to land would otherwise be free to re-dissociate the
+		// mouse immediately after we re-associated it, leaving a dead pointer.
+		// Handing focus back is the queued half and can take its time.
+		C.ehbFocusRelease()
 		if s.cursorHidden {
-			C.ehbShowCursorAllDisplays()
+			C.ehbShowCursor()
 			s.cursorHidden = false
 		}
 		C.ehbSetMouseAssociation(1)
@@ -544,10 +558,14 @@ func (s *session) exitRemote(returnPoint point, source string) {
 
 // restoreCursor is the unconditional teardown. Both cursor hiding and mouse
 // dissociation are scoped to this process's window server connection, so a
-// crash would undo them anyway — but a clean exit must not rely on that.
+// crash would undo them anyway — but a clean exit must not rely on that. The
+// foreground is handed back too, so stopping the bridge without exiting the
+// process does not leave the app sitting in front of whatever the user was
+// actually using.
 func (s *session) restoreCursor() {
+	C.ehbFocusRelease()
 	if s.cursorHidden {
-		C.ehbShowCursorAllDisplays()
+		C.ehbShowCursor()
 		s.cursorHidden = false
 	}
 	C.ehbSetMouseAssociation(1)

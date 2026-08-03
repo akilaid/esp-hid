@@ -78,6 +78,38 @@ in which case **Device resolution** and **This Mac sits** decide which border
 is the crossing point. Those two settings matter either way, since they also
 drive the automatic return.
 
+While remote mode is engaged the app takes the **foreground**, and gives it back
+to whatever was frontmost before when you switch out. No window is opened,
+shown or un-minimized — but the menu bar will read "ESP HID Bridge" for the
+duration. This is not cosmetic: macOS honours `CGAssociateMouseAndMouseCursor-
+Position` and `CGDisplayHideCursor` only for the frontmost application, so
+without it the Mac's own pointer keeps moving and stays visible while the
+device is being driven.
+
+## macOS icons
+
+The menu bar item renders its image as a **template**: macOS throws the colour
+away and fills the alpha silhouette flat, so the art must be a black glyph on a
+transparent background. Feeding it a full-bleed app icon produces a solid
+rounded block, not a picture.
+
+| File | Size | Notes |
+|---|---|---|
+| `packaging/macos/status-idle.png` | 18×18 px | black on transparent |
+| `packaging/macos/status-idle@2x.png` | 36×36 px | |
+| `packaging/macos/status-active.png` | 18×18 px | must differ in **shape**, not colour |
+| `packaging/macos/status-active@2x.png` | 36×36 px | |
+| `packaging/macos/appicon.png` | 1024×1024 px | full colour; body 824×824, radius ≈185, centred |
+
+Keep the glyph inside roughly the middle 16×16 of the 18 px canvas. Since
+template rendering discards colour, remote mode is also signalled by tinting the
+item with the user's accent colour.
+
+All of these are optional. Without `appicon.png` the build falls back to
+`app.ico`, which tops out at 512×512 and so gets upscaled. Without the status
+art it falls back to SF Symbols, which are proper template images — a better
+default than wrong art, so `build-macos.sh` prints a note rather than failing.
+
 ## macOS permissions
 
 macOS gates input capture behind **two** separate privileges, both in

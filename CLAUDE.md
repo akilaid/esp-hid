@@ -117,19 +117,31 @@ intentionally inert while the link is down, so you cannot get trapped
 controlling an unreachable device.
 
 ### macOS specifics
-Three things the implementation must keep doing, each fixing a defect in the
-retired v1 macOS app:
+Four things the implementation must keep doing, the first three each fixing a
+defect in the retired v1 macOS app:
 
 - **Re-enable the tap** on `kCGEventTapDisabledByTimeout` /
   `ByUserInput`, plus a 1 Hz watchdog. macOS disables a tap whose callback is
   slow; without this, capture dies silently and permanently under load.
 - **Never warp per motion event.** Warping suppresses local mouse events for
-  ~0.25 s. Instead: warp once on entry, re-associate then dissociate with
-  `CGAssociateMouseAndMouseCursorPosition`, and read `kCGMouseEventDeltaX/Y`.
+  ~0.25 s. Instead: dissociate with `CGAssociateMouseAndMouseCursorPosition`
+  and read `kCGMouseEventDeltaX/Y`. There is no warp on *entry* either — from a
+  screen edge its delta points back at the edge just crossed and trips the
+  return-pressure model. Exit warps once, to the return point.
 - **Forward modifiers from `flagsChanged`.** macOS never sends key down/up for
   pure modifiers. The handler reconciles all 8 usages (`0xE0..0xE7`) against
   the event flags, seeded silently on entry so the toggle combo itself is not
   forwarded. Caps Lock and Fn are deliberately excluded.
+- **Hold the foreground while remote mode is engaged.** Dissociation and
+  `CGDisplayHideCursor` are honoured only for the *frontmost application*
+  (`CGRemoteOperation.h`: "while an application is in the foreground"), while
+  the session tap keeps capturing regardless. Without the grab, minimizing the
+  window — or merely clicking another app — drives the device *and* moves the
+  local pointer at the same time. `capture_darwin_focus.m` grabs on entry and
+  hands focus back on exit; it is the only AppKit in `internal/capture`, and it
+  is deliberately async on a serial queue with a generation counter, because
+  activation is slow, must not block the tap callback, and must not land after
+  a fast toggle-off.
 
 Never block in the tap callback — only the non-blocking `publish` is allowed.
 `-debug-stall-capture` deliberately stalls it to exercise the recovery path.
