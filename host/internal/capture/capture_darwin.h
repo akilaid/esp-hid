@@ -81,28 +81,9 @@ uint64_t ehbCurrentFlags(void);
 // Fills out with {x, y, w, h} per display; returns the number written.
 int ehbDisplayBounds(double *out, int maxCount);
 
-// --- Foreground -----------------------------------------------------------
-
-// Both cursor dissociation and cursor hiding are honoured only while this
-// process is the *frontmost application* — CGRemoteOperation.h says so
-// outright: "Connect or disconnect the mouse and cursor while an application
-// is in the foreground." Minimize the window, or just click another app, and
-// the window server quietly starts moving and drawing the pointer again even
-// though the session tap keeps capturing. So remote mode has to hold the
-// foreground for its duration.
-//
-// Both return immediately, queueing the slow part onto a serial queue: they
-// are called from the tap callback, which must never block.
-//
-// Call ehbFocusRelease *before* ehbSetMouseAssociation(1), not after. The one
-// thing it does synchronously is cancel any in-flight grab, and a grab still
-// waiting for activation to land would otherwise re-dissociate the mouse just
-// after remote mode re-associated it — leaving a pointer that does not move.
-//
-// Implemented in capture_focus_darwin.m, the one place this package touches
-// AppKit.
-void ehbFocusGrab(void);
-void ehbFocusRelease(void);
+// Lifts the frontmost-application restriction on ehbHideCursor. Call once at
+// startup; returns non-zero on success. See the note by the implementation.
+int ehbEnableBackgroundCursor(void);
 
 // --- Permissions ---------------------------------------------------------
 
