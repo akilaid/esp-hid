@@ -172,6 +172,27 @@ void ehbSetMouseAssociation(int associated) {
   CGAssociateMouseAndMouseCursorPosition(associated ? true : false);
 }
 
+// CGDisplayHideCursor is honoured only while this process is the frontmost
+// application, which remote mode generally is not — minimize the window and
+// the pointer reappears. There is no public way around that. This connection
+// property is the way around it, and has been since roughly 10.5; Synergy and
+// its descendants have relied on it for as long.
+//
+// Private, so treated as optional: measured on macOS 26, and if a future
+// release drops it the call fails, the cursor stays visible, and nothing else
+// changes. Declared here because it appears in no public header.
+typedef int CGSConnectionID;
+extern CGSConnectionID CGSMainConnectionID(void);
+extern CGError CGSSetConnectionProperty(CGSConnectionID cid,
+                                        CGSConnectionID target, CFStringRef key,
+                                        CFTypeRef value);
+
+int ehbEnableBackgroundCursor(void) {
+  CGSConnectionID cid = CGSMainConnectionID();
+  return CGSSetConnectionProperty(cid, cid, CFSTR("SetsCursorInBackground"),
+                                  kCFBooleanTrue) == kCGErrorSuccess;
+}
+
 static int ehbActiveDisplays(CGDirectDisplayID *ids, uint32_t max) {
   uint32_t count = 0;
   if (CGGetActiveDisplayList(max, ids, &count) != kCGErrorSuccess) {

@@ -78,27 +78,29 @@ in which case **Device resolution** and **This Mac sits** decide which border
 is the crossing point. Those two settings matter either way, since they also
 drive the automatic return.
 
-While remote mode is engaged the app takes the **foreground**, and gives it back
-to whatever was frontmost before when you switch out. This is not cosmetic:
-macOS honours `CGAssociateMouseAndMouseCursorPosition` and `CGDisplayHide-
-Cursor` only for the frontmost application, so without it the Mac's own pointer
-keeps moving and stays visible while the device is being driven.
+While remote mode is engaged the Mac's own pointer is **hidden and pinned**
+where it stood when you switched over, and restored when you switch back. The
+app is not brought to the front and nothing is opened or un-minimized.
 
-Simply *asking* to be activated is not enough — macOS 14 and later ignore the
-request from an app that has no window to bring forward, which is precisely the
-case when you have minimized the window. So entering remote mode also orders a
-one-point, fully transparent window on screen. It is mouse-transparent, kept
-out of Mission Control, the Windows menu and ⌘` cycling, and ordered out again
-on exit. Nothing is drawn and your own window is neither restored nor
-un-minimized; the only thing you will notice is the menu bar reading "ESP HID
-Bridge" for the duration.
+That takes more than it sounds like. macOS honours both
+`CGAssociateMouseAndMouseCursorPosition` and `CGDisplayHideCursor` only for the
+*frontmost* application, so with the window minimized — or simply with another
+app focused — the pointer stays visible and keeps moving even though capture is
+working perfectly. Two things address it, and both are needed:
 
-If the pointer ever does stay visible during remote mode, the app says so in
-the system log:
+- The private `SetsCursorInBackground` connection property, set once at
+  startup, which is what lets the hide stick from the background. If a future
+  macOS drops it the call fails and the pointer stays visible; the app says so
+  in the system log:
+  ```bash
+  log show --last 5m --predicate 'eventMessage CONTAINS "esp-hid"'
+  ```
+- Warping the pointer back to its parked position on every motion event.
+  Hiding alone is not enough: an invisible pointer still drifts across the
+  desktop and lights up every row, button and tooltip it slides over.
 
-```bash
-log show --last 5m --predicate 'eventMessage CONTAINS "esp-hid"'
-```
+Do not replace this by activating the app. It was tried; macOS 14 and later
+refuse activation from a background app, even one ordering a window front.
 
 ## macOS icons
 

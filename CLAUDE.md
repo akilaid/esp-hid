@@ -133,20 +133,21 @@ defect in the retired v1 macOS app:
   pure modifiers. The handler reconciles all 8 usages (`0xE0..0xE7`) against
   the event flags, seeded silently on entry so the toggle combo itself is not
   forwarded. Caps Lock and Fn are deliberately excluded.
-- **Hold the foreground while remote mode is engaged.** Dissociation and
-  `CGDisplayHideCursor` are honoured only for the *frontmost application*
-  (`CGRemoteOperation.h`: "while an application is in the foreground"), while
-  the session tap keeps capturing regardless. Without the grab, minimizing the
-  window — or merely clicking another app — drives the device *and* moves the
-  local pointer at the same time. `capture_focus_darwin.m` grabs on entry and
-  hands focus back on exit; it is the only AppKit in `internal/capture`, and it
-  is deliberately async on a serial queue with a generation counter, because
-  activation is slow, must not block the tap callback, and must not land after
-  a fast toggle-off. **Asking to be activated is not sufficient** — macOS 14+
-  ignores it from an app with no window to bring forward, which is exactly the
-  minimized case — so the grab orders a 1pt transparent, mouse-transparent,
-  cycle-excluded window front. It is a focus mechanism, not an interface; do
-  not "clean it up" into `internal/ui`.
+- **Suppress the local pointer without needing the foreground.** Both
+  `CGDisplayHideCursor` and `CGAssociateMouseAndMouseCursorPosition` are
+  honoured only for the *frontmost application* (`CGRemoteOperation.h`: "while
+  an application is in the foreground"), while the session tap captures
+  regardless. So minimizing the window drove the device *and* moved the local
+  pointer at once. Two mechanisms fix it, and both are needed:
+  `ehbEnableBackgroundCursor` sets the private `SetsCursorInBackground`
+  connection property once at startup, which is what makes the hide stick; and
+  `handleMouseMove` warps the pointer back to `pinPoint` on every motion event,
+  which is what stops it wandering and lighting up whatever it passes over.
+  Do **not** try to fix this by activating the app instead — that was tried,
+  and macOS 14+ refuses activation from a background app, even one ordering a
+  window front. Measurements behind the design: warping emits no events (0
+  after 2000 warps, via `CGEventSourceCounterForEventType`) and costs ~20µs,
+  so it is safe inside the callback.
 
 Never block in the tap callback — only the non-blocking `publish` is allowed.
 `-debug-stall-capture` deliberately stalls it to exercise the recovery path.

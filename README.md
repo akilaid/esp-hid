@@ -91,11 +91,10 @@ you through granting.
 - **Coming back** works by hotkey, by pushing the cursor against the far edge
   of the device's screen, or optionally by a deliberate left-swipe
   (`-leftreturn`). This is automatic on both platforms.
-- **On macOS** the app takes the foreground while remote mode is engaged, and
-  hands it back on the way out. Nothing is opened or un-minimized, but the menu
-  bar shows "ESP HID Bridge" meanwhile. macOS hides and pins the pointer only
-  for the frontmost app, so without this the Mac's own cursor would keep moving
-  while the device was being driven.
+- **On macOS** the Mac's own pointer is hidden and pinned where it stood, then
+  restored on the way back. This holds with the window minimized or another app
+  focused: the bridge is never brought to the front, and no window is opened or
+  un-minimized.
 - Remote mode requires the serial link **and** a connected Bluetooth host. If
   either drops, remote mode exits, the cursor is restored, and all keys and
   buttons are released. The hotkey is deliberately inert while the link is
