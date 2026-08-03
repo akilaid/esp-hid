@@ -117,6 +117,22 @@ the callback force-exits remote mode and restores the cursor. The hotkey is
 intentionally inert while the link is down, so you cannot get trapped
 controlling an unreachable device.
 
+**Edge entry is armed differently per platform, on purpose.** Windows crosses
+when the cursor reaches the outer edge; macOS additionally requires
+`edgeEntryPressure` (geometry.go) to accumulate outward motion, because a
+single-display Mac puts the Dock, menu bar and close buttons on those same
+borders. This is not an inconsistency to tidy up. It also cannot simply be
+ported to Windows: the Win32 hook path reads absolute positions
+(`lParam.Pt`) and has no delta once the cursor is clamped, whereas the
+CGEventTap keeps reporting `kCGMouseEventDeltaX/Y` (measured: 41 of 42 frozen
+events carried one).
+
+`edgeArmed` remains load-bearing regardless. `returnPointInRect` lands the
+cursor *exactly on* the activation edge for all four host sides, so
+`canActivateFromHostEdge` is true the instant remote mode exits; only the
+disarm stops an immediate re-entry loop. Pressure narrows that window but must
+never become the only guard.
+
 ### macOS specifics
 Four things the implementation must keep doing, the first three each fixing a
 defect in the retired v1 macOS app:

@@ -45,6 +45,7 @@ static NSButton *gBondsButton = nil;
 static NSTextField *gHotkeyField = nil;
 static NSTextField *gRateField = nil;
 static NSButton *gKeyboardCheck = nil;
+static NSSegmentedControl *gModeControl = nil;
 static NSComboBox *gResolutionCombo = nil;
 static NSPopUpButton *gHostSidePopup = nil;
 
@@ -323,15 +324,21 @@ static void buildWindow(void) {
   [gKeyboardCheck setTitle:@"Forward keyboard"];
   [iv addSubview:gKeyboardCheck];
 
-  // No Auto/Manual choice here: switching to the device is hotkey-only on
-  // macOS. Coming back is still automatic, so say so rather than leaving the
-  // user to work out which directions are on offer.
-  NSTextField *hint = makeLabel(
-      iv, @"Switch with the hotkey; push past the far edge to come back.",
-      iw - 400, 32, 400, NO);
-  [hint setAlignment:NSTextAlignmentRight];
-  [hint setTextColor:[NSColor secondaryLabelColor]];
-  [hint setFont:[NSFont systemFontOfSize:11]];
+  makeLabel(iv, @"Switching:", iw - 250, 32, 110, NO);
+  gModeControl = [[NSSegmentedControl alloc]
+      initWithFrame:NSMakeRect(iw - 135, 30, 135, 24)];
+  [gModeControl setSegmentCount:2];
+  [gModeControl setLabel:@"Auto" forSegment:0];
+  [gModeControl setLabel:@"Manual" forSegment:1];
+  [gModeControl setSegmentStyle:NSSegmentStyleRounded];
+  // Auto is deliberately not a light touch on macOS: a single-display Mac puts
+  // the Dock, the menu bar and every close button on the same borders, so the
+  // pointer has to be pushed against the edge rather than merely reach it.
+  [gModeControl
+      setToolTip:@"Auto: push the pointer against the screen edge to switch. "
+                 @"Either way, push past the far edge of the device's screen "
+                 @"to come back."];
+  [iv addSubview:gModeControl];
 
   // --- Device Layout ------------------------------------------------------
   NSBox *layoutBox = makeBox(root, @"Device Layout", 20, 95);
@@ -388,11 +395,12 @@ void ehbGuiAddHostSide(const char *value) {
 }
 
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
-                   const char *resolution, int hostSideIndex) {
+                   int autoSwitch, const char *resolution, int hostSideIndex) {
   [gHotkeyField setStringValue:[NSString stringWithUTF8String:hotkey]];
   [gRateField setStringValue:[NSString stringWithFormat:@"%d", rateHz]];
   [gKeyboardCheck setState:captureKeyboard ? NSControlStateValueOn
                                            : NSControlStateValueOff];
+  [gModeControl setSelectedSegment:autoSwitch ? 0 : 1];
   [gResolutionCombo setStringValue:[NSString stringWithUTF8String:resolution]];
   if (hostSideIndex >= 0 && hostSideIndex < [gHostSidePopup numberOfItems]) {
     [gHostSidePopup selectItemAtIndex:hostSideIndex];
@@ -408,6 +416,7 @@ EhbForm ehbGuiReadForm(void) {
           sizeof(form.resolution) - 1);
   form.rateHz = [gRateField intValue];
   form.captureKeyboard = ([gKeyboardCheck state] == NSControlStateValueOn) ? 1 : 0;
+  form.autoSwitch = ([gModeControl selectedSegment] == 0) ? 1 : 0;
   form.hostSideIndex = (int)[gHostSidePopup indexOfSelectedItem];
   return form;
 }
@@ -436,6 +445,7 @@ void ehbGuiSetRunning(int running) {
   [gHotkeyField setEnabled:running ? NO : YES];
   [gRateField setEnabled:running ? NO : YES];
   [gKeyboardCheck setEnabled:running ? NO : YES];
+  [gModeControl setEnabled:running ? NO : YES];
   [gResolutionCombo setEnabled:running ? NO : YES];
   [gHostSidePopup setEnabled:running ? NO : YES];
 }

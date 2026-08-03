@@ -110,6 +110,9 @@ func TestIntegrationF19Toggle(t *testing.T) {
 //
 // Host side "right" is used because it puts the entry edge at x<=1, which is
 // reachable regardless of display resolution.
+//
+// See also TestIntegrationEdgeTouchAloneDoesNotEnter, which asserts the other
+// half of the contract: that merely reaching the edge does nothing.
 func TestIntegrationEdgeEntryPersists(t *testing.T) {
 	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
 		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
@@ -138,7 +141,16 @@ func TestIntegrationEdgeEntryPersists(t *testing.T) {
 	// Sweep leftward into the entry edge.
 	syntheticMouseMove(-5, 0)
 	time.Sleep(100 * time.Millisecond)
-	syntheticMouseMoveTo(0, 400, -40)
+
+	// Arriving is not enough any more: entry is armed by pushing against the
+	// border, so this has to keep shoving outward the way a real hand would.
+	// One touch deliberately does nothing — that is the whole point of the
+	// gate, and TestIntegrationEdgeTouchAloneDoesNotEnter covers it.
+	steps := (edgeEntryPressureThreshold / 40) + 2
+	for i := 0; i < steps; i++ {
+		syntheticMouseMoveTo(0, 400, -40)
+		time.Sleep(10 * time.Millisecond)
+	}
 	// Hold: any spurious motion in this window would trip the return.
 	time.Sleep(1200 * time.Millisecond)
 
@@ -173,6 +185,63 @@ func TestIntegrationEdgeEntryPersists(t *testing.T) {
 		t.Errorf("remote mode deactivated on its own %d events after entry; "+
 			"entering must not emit motion that trips the return-pressure model",
 			deactivatedAt-activatedAt)
+	}
+}
+
+// TestIntegrationEdgeTouchAloneDoesNotEnter is the reason edge switching is
+// offered on macOS at all. A single-display Mac puts the Dock, the menu bar and
+// every window's close button on the same borders remote mode would cross, so
+// arriving at one must not be a crossing — only pushing against it is.
+//
+// The pointer is placed on the entry edge with a delta far below the pressure
+// threshold, several times over, with gaps longer than the pressure window so
+// nothing accumulates between them. That is what reaching for something at the
+// edge of the screen looks like.
+func TestIntegrationEdgeTouchAloneDoesNotEnter(t *testing.T) {
+	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
+		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
+	}
+	if perms := CheckPermissions(); !perms.OK(true) {
+		t.Skipf("missing permissions: %s", perms.PermissionHint(true))
+	}
+
+	events := make(chan Event, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Options{
+			CaptureKeyboard: true,
+			ToggleHotkey:    "F9",
+			SlaveWidth:      1080,
+			SlaveHeight:     1920,
+			HostSide:        HostSideRight,
+			AutoSwitch:      true,
+		}, events, func() bool { return true })
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	for i := 0; i < 4; i++ {
+		syntheticMouseMoveTo(0, 300+float64(i)*40, -8)
+		time.Sleep(edgeEntryPressureWindow + 100*time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+	close(events)
+
+	for event := range events {
+		if event.Kind == EventRemoteMode && event.Active && event.Source == "edge" {
+			t.Fatal("touching the edge without pushing against it entered remote mode")
+		}
 	}
 }
 
