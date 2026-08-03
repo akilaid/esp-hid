@@ -180,6 +180,12 @@ Cross-compile check for Windows from macOS/Linux:
 check — the macOS capture and GUI are cgo and need the macOS SDK, so the
 `build-macos` CI job on `macos-14` is what type-checks them.
 
+Also worth running before pushing: `GOOS=linux GOARCH=amd64 go build ./...`.
+It reproduces the ubuntu CI job, which is the only thing that catches a
+platform-specific `.c`/`.h`/`.m` file whose GOOS suffix is not the final
+underscore-separated element — such a file has no build constraint at all and
+fails the Linux build, while a darwin-only build compiles it happily.
+
 There is also an opt-in integration test that drives the real macOS event
 tap. It needs both permissions and **briefly takes over system input**, so it
 is gated behind a build tag and an environment variable:

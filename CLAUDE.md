@@ -68,6 +68,7 @@ Test without the GUI app: `tools/hidctl.py status` (needs a venv at
 
 go vet ./... && go test ./...
 GOOS=windows GOARCH=amd64 go build ./...   # cross-compile check
+GOOS=linux GOARCH=amd64 go build ./...     # reproduces the ubuntu CI job
 ```
 There is no darwin cross-compile check — the macOS layers need the macOS SDK,
 so the `build-macos` CI job is what type-checks them.
@@ -137,7 +138,7 @@ defect in the retired v1 macOS app:
   (`CGRemoteOperation.h`: "while an application is in the foreground"), while
   the session tap keeps capturing regardless. Without the grab, minimizing the
   window — or merely clicking another app — drives the device *and* moves the
-  local pointer at the same time. `capture_darwin_focus.m` grabs on entry and
+  local pointer at the same time. `capture_focus_darwin.m` grabs on entry and
   hands focus back on exit; it is the only AppKit in `internal/capture`, and it
   is deliberately async on a serial queue with a generation counter, because
   activation is slow, must not block the tap callback, and must not land after
@@ -159,7 +160,12 @@ tunable means touching `config.go` (struct + flag + validation),
 ## Conventions
 
 - **Build tags are load-bearing.** `_windows.go` / `_darwin.go` suffixes carry
-  implicit GOOS constraints, and that applies to `.c`/`.h`/`.m` files too.
+  implicit GOOS constraints, and that applies to `.c`/`.h`/`.m` files too. The
+  GOOS must be the **final** underscore-separated element:
+  `capture_focus_darwin.m` is constrained, `capture_darwin_focus.m` is not, and
+  an unconstrained `.m` file fails the ubuntu job with "Objective-C source
+  files not allowed when not using cgo" — a darwin-only build never notices.
+  `GOOS=linux GOARCH=amd64 go build ./...` reproduces that job locally.
 - **`*_cgkeycode.go` is deliberately not `_darwin.go`.** Those files are pure
   macOS lookup tables with no cgo, so keeping them untagged means they and
   their tests compile and run on every platform's CI. Do not rename them.
