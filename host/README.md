@@ -79,12 +79,26 @@ is the crossing point. Those two settings matter either way, since they also
 drive the automatic return.
 
 While remote mode is engaged the app takes the **foreground**, and gives it back
-to whatever was frontmost before when you switch out. No window is opened,
-shown or un-minimized — but the menu bar will read "ESP HID Bridge" for the
-duration. This is not cosmetic: macOS honours `CGAssociateMouseAndMouseCursor-
-Position` and `CGDisplayHideCursor` only for the frontmost application, so
-without it the Mac's own pointer keeps moving and stays visible while the
-device is being driven.
+to whatever was frontmost before when you switch out. This is not cosmetic:
+macOS honours `CGAssociateMouseAndMouseCursorPosition` and `CGDisplayHide-
+Cursor` only for the frontmost application, so without it the Mac's own pointer
+keeps moving and stays visible while the device is being driven.
+
+Simply *asking* to be activated is not enough — macOS 14 and later ignore the
+request from an app that has no window to bring forward, which is precisely the
+case when you have minimized the window. So entering remote mode also orders a
+one-point, fully transparent window on screen. It is mouse-transparent, kept
+out of Mission Control, the Windows menu and ⌘` cycling, and ordered out again
+on exit. Nothing is drawn and your own window is neither restored nor
+un-minimized; the only thing you will notice is the menu bar reading "ESP HID
+Bridge" for the duration.
+
+If the pointer ever does stay visible during remote mode, the app says so in
+the system log:
+
+```bash
+log show --last 5m --predicate 'eventMessage CONTAINS "esp-hid"'
+```
 
 ## macOS icons
 

@@ -142,7 +142,11 @@ defect in the retired v1 macOS app:
   hands focus back on exit; it is the only AppKit in `internal/capture`, and it
   is deliberately async on a serial queue with a generation counter, because
   activation is slow, must not block the tap callback, and must not land after
-  a fast toggle-off.
+  a fast toggle-off. **Asking to be activated is not sufficient** — macOS 14+
+  ignores it from an app with no window to bring forward, which is exactly the
+  minimized case — so the grab orders a 1pt transparent, mouse-transparent,
+  cycle-excluded window front. It is a focus mechanism, not an interface; do
+  not "clean it up" into `internal/ui`.
 
 Never block in the tap callback — only the non-blocking `publish` is allowed.
 `-debug-stall-capture` deliberately stalls it to exercise the recovery path.
