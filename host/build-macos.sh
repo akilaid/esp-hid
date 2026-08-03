@@ -77,23 +77,43 @@ sed -e "s|@SHORT_VERSION@|$SHORT_VERSION|g" \
   -e "s|@BUNDLE_ID@|$BUNDLE_ID|g" \
   packaging/macos/Info.plist.in >"$APP_DIR/Contents/Info.plist"
 
-# Icons are generated from the existing Windows .ico files, which carry a
-# 512x512 variant, so macOS needs no separate art.
+# The app icon prefers a purpose-drawn 1024x1024 PNG; app.ico is the fallback,
+# and only reaches 512x512, so the largest iconset slots get upscaled.
 echo "  generating icons"
+APPICON_SRC="packaging/macos/appicon.png"
+if [ ! -f "$APPICON_SRC" ]; then
+  APPICON_SRC="app.ico"
+fi
 ICONSET="$BUILD_DIR/AppIcon.iconset"
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
-  sips -s format png -Z "$size" app.ico --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-  sips -s format png -Z "$((size * 2))" app.ico --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  sips -s format png -Z "$size" "$APPICON_SRC" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -s format png -Z "$((size * 2))" "$APPICON_SRC" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
 # Menu-bar images: one for idle, one shown while remote mode is active.
-sips -s format png -Z 18 app.ico --out "$APP_DIR/Contents/Resources/status-idle.png" >/dev/null
-sips -s format png -Z 36 app.ico --out "$APP_DIR/Contents/Resources/status-idle@2x.png" >/dev/null
-sips -s format png -Z 18 on.ico --out "$APP_DIR/Contents/Resources/status-active.png" >/dev/null
-sips -s format png -Z 36 on.ico --out "$APP_DIR/Contents/Resources/status-active@2x.png" >/dev/null
+#
+# These are copied, never derived from the .ico files. The status item renders
+# them as *template* images, which means macOS discards the colour and fills
+# the alpha silhouette flat — so a full-bleed app icon comes out as a solid
+# rounded block, which is exactly what shipping the scaled-down app.ico did.
+# The art has to be a black-on-transparent glyph, so it is drawn by hand.
+#
+# When no art is present the app falls back to an SF Symbol, which is a real
+# template image and looks native. That is a better default than a block, so
+# missing art is deliberately not an error.
+status_art_found=0
+for image in status-idle status-idle@2x status-active status-active@2x; do
+  if [ -f "packaging/macos/$image.png" ]; then
+    cp "packaging/macos/$image.png" "$APP_DIR/Contents/Resources/$image.png"
+    status_art_found=1
+  fi
+done
+if [ "$status_art_found" -eq 0 ]; then
+  echo "  note: no packaging/macos/status-*.png; using the SF Symbol fallback"
+fi
 
 echo "  signing (ad-hoc)"
 # Deliberately no --options runtime: the hardened runtime buys nothing

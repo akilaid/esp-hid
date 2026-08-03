@@ -180,29 +180,28 @@ static int ehbActiveDisplays(CGDirectDisplayID *ids, uint32_t max) {
   return (int)count;
 }
 
-// Hiding on every display rather than just the main one matters: the cursor
-// is usually parked over some other app's window when remote mode engages.
-void ehbHideCursorAllDisplays(void) {
-  CGDirectDisplayID ids[EHB_MAX_DISPLAYS];
-  int count = ehbActiveDisplays(ids, EHB_MAX_DISPLAYS);
-  if (count == 0) {
+// One call, not one per display. CGDisplayHideCursor ignores its display
+// argument entirely (CGDirectDisplay.h: "The `display' parameter is ignored")
+// and increments a single per-connection hide count, so looping over the
+// active display list only inflated that count. It also made the count depend
+// on how many displays were attached: plug or unplug a monitor while remote
+// mode was engaged and the later shows no longer balanced the hides, leaving
+// the cursor either permanently invisible or visible too early.
+//
+// The flag makes both calls idempotent, so a re-assert costs nothing.
+static int gCursorHidden = 0;
+
+void ehbHideCursor(void) {
+  if (!gCursorHidden) {
     CGDisplayHideCursor(kCGDirectMainDisplay);
-    return;
-  }
-  for (int i = 0; i < count; i++) {
-    CGDisplayHideCursor(ids[i]);
+    gCursorHidden = 1;
   }
 }
 
-void ehbShowCursorAllDisplays(void) {
-  CGDirectDisplayID ids[EHB_MAX_DISPLAYS];
-  int count = ehbActiveDisplays(ids, EHB_MAX_DISPLAYS);
-  if (count == 0) {
+void ehbShowCursor(void) {
+  if (gCursorHidden) {
     CGDisplayShowCursor(kCGDirectMainDisplay);
-    return;
-  }
-  for (int i = 0; i < count; i++) {
-    CGDisplayShowCursor(ids[i]);
+    gCursorHidden = 0;
   }
 }
 
