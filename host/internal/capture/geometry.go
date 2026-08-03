@@ -17,6 +17,12 @@ const (
 	leftwardReturnMinStep   = 6
 	leftwardReturnThreshold = 900
 	leftwardReturnWindow    = 450 * time.Millisecond
+	// How hard the pointer must be pushed into the outer edge before it
+	// crosses. Reaching the border is not enough on a single-display Mac,
+	// where the same borders carry the Dock, the menu bar and every window's
+	// close button — see edgeEntryPressure.
+	edgeEntryPressureThreshold = 200
+	edgeEntryPressureWindow    = 500 * time.Millisecond
 )
 
 type point struct {
@@ -330,6 +336,60 @@ func (l *leftwardReturnTracker) update(dx, dy int, now time.Time) bool {
 		l.distance = 0
 	}
 	return l.distance >= leftwardReturnThreshold
+}
+
+// edgeEntryPressure decides whether the pointer is being *pushed* against the
+// outer edge or has merely arrived there.
+//
+// The distinction is the whole reason edge switching is usable on a Mac. Once
+// the pointer is against the border the window server has nowhere left to put
+// it, so the location stops changing — but the events keep coming and keep
+// carrying the hardware delta (measured: 41 of 42 frozen events reported one,
+// the largest 83). Someone reaching for the Dock or a close button decelerates
+// on arrival and contributes almost nothing; someone crossing to the device
+// keeps shoving and contributes a great deal.
+//
+// Only the component pointing outward across the host-side edge counts, so
+// running the pointer *along* a border — down the right edge to a scrollbar,
+// say — never builds pressure.
+type edgeEntryPressure struct {
+	amount int
+	last   time.Time
+}
+
+func (p *edgeEntryPressure) reset() {
+	p.amount = 0
+	p.last = time.Time{}
+}
+
+// push accumulates one event's worth of outward movement and reports whether
+// the crossing is now armed.
+func (p *edgeEntryPressure) push(dx, dy int, hostSide string, now time.Time) bool {
+	// Pressure is a burst, not a total: stop shoving for half a second and it
+	// is gone, so a pointer resting against the border cannot creep over the
+	// threshold.
+	if !p.last.IsZero() && now.Sub(p.last) > edgeEntryPressureWindow {
+		p.amount = 0
+	}
+	p.last = now
+
+	// Which way is "out" mirrors isOuterActivationEdgePoint: the activation
+	// edge is the border *opposite* the side the host sits on.
+	outward := 0
+	switch hostSide {
+	case HostSideRight:
+		outward = -dx
+	case HostSideTop:
+		outward = -dy
+	case HostSideBottom:
+		outward = dy
+	default: // host on the left: cross at the right border
+		outward = dx
+	}
+	if outward > 0 {
+		p.amount += outward
+	}
+	return p.amount >= edgeEntryPressureThreshold
 }
 
 func clampInt(value, minValue, maxValue int) int {

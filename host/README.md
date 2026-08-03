@@ -67,16 +67,29 @@ for Windows, `ESP-HID-Bridge-<version>.dmg` for macOS.
 
 ## Switching, on macOS
 
-The macOS GUI is **hotkey-only**: there is no Auto/Manual choice, because
-entering remote mode by nudging the cursor into a screen edge is easy to
-trigger by accident on a single-display Mac. Returning is still automatic —
-push the pointer past the far edge of the device's screen and it comes back.
+**Switching: Auto** crosses to the device at a screen edge, exactly as on
+Windows — but macOS arms it differently, and deliberately so.
 
-The edge-entry code is shared with Windows and still works; it is simply not
-offered in the GUI. `-auto-switch=true` enables it for anyone who wants it,
-in which case **Device resolution** and **This Mac sits** decide which border
-is the crossing point. Those two settings matter either way, since they also
-drive the automatic return.
+On Windows, reaching the edge crosses. On a single-display Mac that is a bad
+trade: the Dock, the menu bar and every window's close button live on the same
+borders, so arriving at one is usually not an attempt to cross. macOS therefore
+requires the pointer to be **pushed against** the edge. Once it is stuck
+against the border the window server has nowhere to put it, so the location
+stops changing while the events keep reporting hardware deltas — someone
+reaching for the Dock decelerates and contributes almost nothing, someone
+crossing keeps shoving and contributes a lot. Only motion pointing *outward*
+counts, so running the pointer along a border never builds pressure, and it
+decays if you stop pushing for half a second.
+
+`edgeEntryPressureThreshold` in `internal/capture/geometry.go` is the dial. If
+accidental crossings happen, raise it; if a deliberate one feels like work,
+lower it.
+
+**Device resolution** and **This Mac sits** decide which border is the crossing
+point. Both matter even in Manual, since they also drive the automatic return.
+
+Returning is automatic either way — push the pointer past the far edge of the
+device's screen and it comes back.
 
 While remote mode is engaged the Mac's own pointer is **hidden and pinned**
 where it stood when you switched over, and restored when you switch back. The

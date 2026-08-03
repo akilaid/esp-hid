@@ -71,6 +71,10 @@ type session struct {
 
 	slaveCursor *virtualCursor
 	leftward    *leftwardReturnTracker
+	// Gates edge entry: the pointer must be pushed against the outer border,
+	// not merely reach it. macOS only — Windows sees absolute positions and
+	// has no delta to measure once the pointer is clamped.
+	entryPressure edgeEntryPressure
 
 	remoteModeActive bool
 	cursorHidden     bool
@@ -79,8 +83,8 @@ type session struct {
 	remoteAnchor     point
 	// Where the local pointer is held while remote mode is active: wherever
 	// it happened to be on entry, so entering never moves it.
-	pinPoint point
-	monitorRects     []monitorRect
+	pinPoint     point
+	monitorRects []monitorRect
 
 	// Shadow of what the slave believes is held, indexed like
 	// keymap.Modifiers. macOS reports modifier state, not transitions, so
@@ -280,18 +284,26 @@ func (s *session) handleMouseMove(event C.CGEventRef) C.CGEventRef {
 			s.edgeArmed = true
 			s.leftward.reset()
 			s.slaveCursor.resetPressure()
+			s.entryPressure.reset()
 		case s.opts.AutoSwitch && s.canActivateFromHostEdge(location):
-			if s.edgeArmed {
+			// Reaching the edge is not enough here, unlike Windows: keep
+			// pushing outward against it. The pointer is already stuck, so
+			// only a deliberate shove keeps producing outward motion.
+			dx := int(C.ehbEventDeltaX(event))
+			dy := int(C.ehbEventDeltaY(event))
+			if s.edgeArmed && s.entryPressure.push(dx, dy, s.hostSide, time.Now()) {
 				s.setAnchorForPoint(location)
 				s.slaveCursor.resetForActivation("edge")
 				s.setRemoteMode(true, "edge")
 				s.edgeArmed = false
 				s.leftward.reset()
 				s.slaveCursor.resetPressure()
+				s.entryPressure.reset()
 				return C.ehbNullEvent()
 			}
 		default:
 			s.edgeArmed = true
+			s.entryPressure.reset()
 		}
 		return event
 	}

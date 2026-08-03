@@ -83,11 +83,15 @@ you through granting.
 - **Switching to the device** is done with the toggle hotkey. Any single key
   or combination works — `F9` by default, through to `F20`, letters, digits,
   the keypad, and navigation keys, with any of Ctrl/Alt/Shift/Cmd.
-- **On Windows** there is also **Auto** switching, which activates remote
-  mode when the cursor reaches the host-side edge of your desktop. Seams
-  between multiple monitors never trigger it — only the true outer boundary
-  does. The macOS app is hotkey-only and does not offer this; the
-  `-auto-switch` flag still enables it there for anyone who wants it.
+- **Auto** switching is the other way across, on both platforms: set
+  **Switching** to Auto and the cursor crosses at the host-side edge of your
+  desktop. Seams between multiple monitors never trigger it — only the true
+  outer boundary does.
+  - **On Windows**, reaching the edge crosses.
+  - **On macOS**, you have to *push against* the edge — keep moving outward
+    once the pointer is already stuck there. A single display puts the Dock,
+    the menu bar and every close button on those same borders, so merely
+    arriving must not be a crossing.
 - **Coming back** works by hotkey, by pushing the cursor against the far edge
   of the device's screen, or optionally by a deliberate left-swipe
   (`-leftreturn`). This is automatic on both platforms.
@@ -132,8 +136,9 @@ Both platforms accept the same flags.
 - `-toggle`: remote-mode hotkey combo (default `F9`). Accepts `F1`–`F20`,
   `A`–`Z`, `0`–`9`, keypad keys, and navigation keys, optionally prefixed
   with `Ctrl+`, `Alt+`, `Shift+` and `Win+`/`Cmd+`.
-- `-auto-switch`: enter remote mode at the screen edge (default `true`;
-  the macOS GUI does not offer it and leaves it off).
+- `-auto-switch`: enter remote mode at the screen edge (default `true`). Both
+  GUIs expose this as **Switching: Auto / Manual**, and the GUI's value wins
+  when you press Start.
 - `-gui`: launch the GUI (default `true`).
 - `-cli`: diagnostics only, no input capture (implies `-gui=false`).
 
