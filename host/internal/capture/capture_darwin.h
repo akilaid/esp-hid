@@ -99,7 +99,7 @@ int ehbDisplayBounds(double *out, int maxCount);
 // waiting for activation to land would otherwise re-dissociate the mouse just
 // after remote mode re-associated it — leaving a pointer that does not move.
 //
-// Implemented in capture_darwin_focus.m, the one place this package touches
+// Implemented in capture_focus_darwin.m, the one place this package touches
 // AppKit.
 void ehbFocusGrab(void);
 void ehbFocusRelease(void);

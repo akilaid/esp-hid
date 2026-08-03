@@ -23,7 +23,7 @@ package capture
 
 /*
 #cgo CFLAGS: -Wall
-// AppKit is here only for capture_darwin_focus.m, which needs
+// AppKit is here only for capture_focus_darwin.m, which needs
 // NSRunningApplication to hold the foreground while remote mode is engaged.
 // It builds no UI; the AppKit that draws things stays in internal/ui.
 #cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation -framework CoreGraphics -framework Carbon -framework AppKit
