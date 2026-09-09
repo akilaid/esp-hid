@@ -17,6 +17,7 @@ const (
 type persistedSettings struct {
 	Version         int      `json:"version"`
 	PortOverride    *string  `json:"portOverride,omitempty"`
+	DeviceSerial    *string  `json:"deviceSerial,omitempty"`
 	MoveRateHz      *int     `json:"moveRateHz,omitempty"`
 	MoveDeadzone    *int     `json:"moveDeadzone,omitempty"`
 	MoveSmoothing   *float64 `json:"moveSmoothing,omitempty"`
@@ -57,6 +58,9 @@ func loadSettings() (persistedSettings, error) {
 func (p persistedSettings) applyTo(cfg *Config) {
 	if p.PortOverride != nil {
 		cfg.PortOverride = *p.PortOverride
+	}
+	if p.DeviceSerial != nil {
+		cfg.DeviceSerial = *p.DeviceSerial
 	}
 	if p.MoveRateHz != nil && *p.MoveRateHz > 0 {
 		cfg.MoveRateHz = *p.MoveRateHz
@@ -112,6 +116,7 @@ func Save(cfg Config) error {
 	settings := persistedSettings{
 		Version:         2,
 		PortOverride:    &cfg.PortOverride,
+		DeviceSerial:    &cfg.DeviceSerial,
 		MoveRateHz:      &cfg.MoveRateHz,
 		MoveDeadzone:    &cfg.MoveDeadzone,
 		MoveSmoothing:   &cfg.MoveSmoothing,
@@ -126,6 +131,34 @@ func Save(cfg Config) error {
 		AutoSwitch:      &cfg.AutoSwitch,
 		GUIMode:         &cfg.GUIMode,
 	}
+	return writeSettings(path, settings)
+}
+
+// SaveDeviceSerial persists only the learned device binding, leaving every
+// other key on disk untouched.
+//
+// Deliberately not Save(cfg): the binding is discovered at runtime, and the
+// Config it lands in may carry ephemeral flags that the user never chose. -cli
+// and -gui=false both force GUIMode false, so writing the whole config back
+// after a diagnostic run would silently make the app launch headless from then
+// on. Only the one key the app actually learned belongs on disk.
+func SaveDeviceSerial(serial string) error {
+	path, err := settingsPath()
+	if err != nil {
+		return err
+	}
+	// A missing or unreadable file is not a reason to forget the device: fall
+	// through with whatever loaded and write the binding regardless.
+	settings, _ := loadSettings()
+	settings.Version = 2
+	settings.DeviceSerial = &serial
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return writeSettings(path, settings)
+}
+
+func writeSettings(path string, settings persistedSettings) error {
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

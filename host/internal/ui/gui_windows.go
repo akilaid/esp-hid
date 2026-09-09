@@ -38,6 +38,7 @@ type gui struct {
 	startButton   *walk.PushButton
 	stopButton    *walk.PushButton
 	bondsButton   *walk.PushButton
+	forgetButton  *walk.PushButton
 	hotkeyEdit    *walk.LineEdit
 	rateEdit      *walk.LineEdit
 	keyboardCheck *walk.CheckBox
@@ -115,6 +116,7 @@ func (app *gui) build() error {
 							PushButton{AssignTo: &app.startButton, Text: "Start", OnClicked: app.startBridge},
 							PushButton{AssignTo: &app.stopButton, Text: "Stop", Enabled: false, OnClicked: app.stopBridge},
 							HSpacer{},
+							PushButton{AssignTo: &app.forgetButton, Text: "Forget device", OnClicked: app.forgetDevice},
 							PushButton{AssignTo: &app.bondsButton, Text: "Clear device bonds", OnClicked: app.clearBonds},
 						},
 					},
@@ -275,9 +277,27 @@ func (app *gui) clearBonds() {
 		walk.MsgBoxIconInformation)
 }
 
+// forgetDevice drops the learned binding so the next Start re-identifies the
+// bridge by handshake. This is the way out of "never substitute": swap in a
+// replacement board, forget, start, and it binds to the new one.
+func (app *gui) forgetDevice() {
+	if app.runtime.Running() {
+		walk.MsgBox(app.mw, "Stop first",
+			"Stop the bridge before forgetting the device.", walk.MsgBoxIconInformation)
+		return
+	}
+	app.cfg.DeviceSerial = ""
+	if err := config.Save(app.cfg); err != nil {
+		log.Printf("settings save failed: %v", err)
+	}
+	app.portLabel.SetText("-")
+	app.statusLabel.SetText("Device forgotten — press Start to detect again")
+}
+
 func (app *gui) setRunning(running bool) {
 	app.startButton.SetEnabled(!running)
 	app.stopButton.SetEnabled(running)
+	app.forgetButton.SetEnabled(!running)
 	app.hotkeyEdit.SetEnabled(!running)
 	app.rateEdit.SetEnabled(!running)
 	app.keyboardCheck.SetEnabled(!running)
@@ -302,11 +322,31 @@ func (app *gui) applyEvent(event bridge.Event) {
 		app.statusLabel.SetText("Starting — looking for device…")
 	case bridge.EventSerialConnected:
 		app.statusLabel.SetText("Running")
-		app.portLabel.SetText(event.Port)
+		app.portLabel.SetText(DeviceText(event.Serial, event.Port))
 	case bridge.EventSerialDown:
 		app.statusLabel.SetText("Waiting for device (USB)…")
 		app.portLabel.SetText("-")
 		app.bleLabel.SetText("-")
+	case bridge.EventDiscovering:
+		app.statusLabel.SetText("Identifying device…")
+		log.Printf("device discovery: %s", event.Detail)
+	case bridge.EventDeviceLearned:
+		// Remember which board this is. Without this the next launch would
+		// rediscover it, and re-probe the user's other ESP32s to do so.
+		app.cfg.DeviceSerial = event.Serial
+		if err := config.SaveDeviceSerial(event.Serial); err != nil {
+			log.Printf("could not save device binding: %v", err)
+		}
+		app.portLabel.SetText(DeviceText(event.Serial, event.Port))
+	case bridge.EventDeviceAbsent:
+		app.statusLabel.SetText("Bridge not connected")
+		app.portLabel.SetText(DeviceText(event.Serial, "") + " (absent)")
+		app.bleLabel.SetText("-")
+		log.Printf("bridge absent: %s", event.Detail)
+	case bridge.EventDeviceAmbiguous:
+		app.statusLabel.SetText("Several bridges found — leave one attached")
+		app.portLabel.SetText("-")
+		log.Printf("ambiguous bridge: %s", event.Detail)
 	case bridge.EventHello:
 		app.fwLabel.SetText(FirmwareText(event.Hello))
 	case bridge.EventBleState:

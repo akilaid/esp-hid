@@ -39,6 +39,16 @@ const (
 	// withheld Accessibility or Input Monitoring. It is separated from
 	// EventCaptureError so the UI can offer the fix instead of an error box.
 	EventPermissionRequired
+	// EventDiscovering: identifying which attached ESP32 is the bridge.
+	EventDiscovering
+	// EventDeviceLearned: the bridge was identified. The UI MUST persist
+	// Serial into config, or the next run will probe all over again.
+	EventDeviceLearned
+	// EventDeviceAbsent: the bound bridge is not attached. Other ESP32s may
+	// well be, and none of them will be opened.
+	EventDeviceAbsent
+	// EventDeviceAmbiguous: several boards answered the handshake.
+	EventDeviceAmbiguous
 )
 
 // Event is a unified runtime event.
@@ -48,7 +58,8 @@ type Event struct {
 	Detail   string
 	Hello    protocol.Hello
 	BleState protocol.BleState
-	Active   bool // EventRemoteMode
+	Active   bool   // EventRemoteMode
+	Serial   string // bridge USB serial: EventDeviceLearned, EventDeviceAbsent
 }
 
 // Runtime owns one bridge session.
@@ -97,7 +108,7 @@ func (r *Runtime) Start(cfg config.Config) error {
 	captureEvents := make(chan capture.Event, 4096)
 	captureErrors := make(chan error, 1)
 
-	link := device.New(deviceEvents, cfg.PortOverride)
+	link := device.New(deviceEvents, cfg.PortOverride, cfg.DeviceSerial)
 	go link.Run()
 
 	// Remote mode may engage only while the serial link is up AND the device
@@ -167,6 +178,20 @@ func (r *Runtime) emit(event Event) {
 	}
 }
 
+// emitBlocking delivers an event even when the consumer is behind, giving up
+// only when the session ends.
+//
+// emit drops on a full channel, which is right for status chatter but wrong for
+// EventDeviceLearned: that event carries the identity the UI has to persist, and
+// losing it silently un-learns the device — the next launch would rediscover it
+// and re-probe the user's other ESP32s all over again.
+func (r *Runtime) emitBlocking(ctx context.Context, event Event) {
+	select {
+	case r.events <- event:
+	case <-ctx.Done():
+	}
+}
+
 func (r *Runtime) pump(
 	ctx context.Context,
 	cfg config.Config,
@@ -211,9 +236,19 @@ func (r *Runtime) pump(
 		case event := <-deviceEvents:
 			switch event.Kind {
 			case device.EventConnected:
-				r.emit(Event{Kind: EventSerialConnected, Port: event.Port})
+				r.emit(Event{Kind: EventSerialConnected, Port: event.Port, Serial: event.Serial})
 			case device.EventDisconnected:
 				r.emit(Event{Kind: EventSerialDown, Detail: event.Detail})
+			case device.EventDiscovering:
+				r.emit(Event{Kind: EventDiscovering, Detail: event.Detail})
+			case device.EventDeviceLearned:
+				// Must not be dropped: the UI persists Serial from this event.
+				r.emitBlocking(ctx, Event{Kind: EventDeviceLearned, Serial: event.Serial,
+					Port: event.Port, Detail: event.Detail})
+			case device.EventDeviceAbsent:
+				r.emit(Event{Kind: EventDeviceAbsent, Serial: event.Serial, Detail: event.Detail})
+			case device.EventDeviceAmbiguous:
+				r.emit(Event{Kind: EventDeviceAmbiguous, Detail: event.Detail})
 			case device.EventHello:
 				r.emit(Event{Kind: EventHello, Hello: event.Hello})
 			case device.EventBleState:

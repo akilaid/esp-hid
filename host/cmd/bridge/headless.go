@@ -41,6 +41,20 @@ func runHeadlessBridge(cfg config.Config) error {
 				log.Printf("serial connected on %s", event.Port)
 			case bridge.EventSerialDown:
 				log.Printf("serial down: %s", event.Detail)
+			case bridge.EventDiscovering:
+				log.Printf("discovering: %s", event.Detail)
+			case bridge.EventDeviceLearned:
+				// Persist, or the next launch rediscovers the bridge and
+				// re-probes the user's other ESP32s to do it.
+				log.Printf("bridge identified: %s", event.Detail)
+				cfg.DeviceSerial = event.Serial
+				if err := config.SaveDeviceSerial(event.Serial); err != nil {
+					log.Printf("could not save device binding: %v", err)
+				}
+			case bridge.EventDeviceAbsent:
+				log.Printf("bridge not connected: %s", event.Detail)
+			case bridge.EventDeviceAmbiguous:
+				log.Printf("ambiguous: %s", event.Detail)
 			case bridge.EventHello:
 				log.Printf("firmware %d.%d.%d", event.Hello.FwMajor, event.Hello.FwMinor, event.Hello.FwPatch)
 			case bridge.EventBleState:

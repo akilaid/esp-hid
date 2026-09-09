@@ -7,8 +7,10 @@ paired phone or tablet. Your PC's own mouse and keyboard drive the phone.
 ## Highlights
 
 - **Windows and macOS** senders, both written in Go, each with a native GUI.
-- ESP32-C3 firmware built on ESP-IDF and NimBLE.
-- Zero-config device discovery by USB VID/PID — no port picker.
+- ESP32 firmware built on ESP-IDF and NimBLE.
+- Zero-config device discovery: the app identifies its own ESP32 by USB
+  serial number and remembers it, so other ESP32 boards on the same machine
+  are never driven by mistake.
 - A binary, bidirectional protocol: the app shows the device's Bluetooth
   state and firmware version, and can clear stale pairings.
 - Remote mode toggled by a configurable hotkey (e.g. `Alt+F7`) or by pushing
@@ -26,7 +28,7 @@ The project has two generations. **v2 is the current one.**
 
 | Path | Role |
 |---|---|
-| `firmware-idf/` | **v2 firmware.** ESP-IDF v6.0, ESP32-C3, NimBLE. |
+| `firmware-idf/` | **v2 firmware.** ESP-IDF v6.0, ESP32, NimBLE. |
 | `host/` | **v2 sender.** Go, Windows + macOS. |
 | `firmware/` | v1 firmware (Arduino sketch). Superseded. |
 | `software/` | v1 Windows sender. Superseded. |
@@ -49,14 +51,14 @@ Changing a message means changing all of them.
    (macOS).
 2. In remote mode it swallows your real input rather than letting it reach
    the desktop, and turns it into binary frames.
-3. Frames go over the ESP32-C3's native USB serial link.
+3. Frames go over the ESP32's native USB serial link.
 4. The firmware replays them as BLE HID reports to the paired device.
 
 ## Quick start
 
 1. **Flash the firmware** — see [`firmware-idf/README.md`](firmware-idf/README.md).
 2. **Pair your phone** with the Bluetooth device `ESP-HID-ME`.
-3. **Connect the ESP32-C3 to your computer** over USB.
+3. **Connect the ESP32 to your computer** over USB.
 4. **Run the sender.** On macOS, open `ESP-HID-Bridge-<version>.dmg` from
    [Releases](https://github.com/akilaid/esp-hid/releases) and drag the app
    into Applications; on Windows, download `esp-hid-bridge.exe`. See
@@ -68,8 +70,14 @@ Changing a message means changing all of them.
 
 ## Requirements
 
-**Device:** an ESP32-C3 board. The v2 firmware uses the chip's native USB
-Serial/JTAG peripheral, so no USB-serial adapter chip is involved.
+**Device:** an ESP32 with a native USB Serial/JTAG peripheral — C3, S3, C6 and
+H2 all have one. The firmware talks to it directly, so no USB-serial adapter
+chip is involved. Prebuilt release images are compiled for the C3; for another
+chip build from source with `idf.py set-target <chip>`.
+
+The host app is chip-agnostic: it identifies whichever board is running the
+bridge by its USB serial number, so other ESP32s on the same machine are left
+alone.
 
 **Windows:** Windows 10/11, Go 1.22+ to build from source.
 
@@ -121,7 +129,11 @@ them for that run.
 
 Both platforms accept the same flags.
 
-- `-port`: serial port override (default: auto-detect by USB ID `303A:1001`).
+- `-port`: serial port override (default: auto-detect). A debugging escape
+  hatch — it bypasses device identification entirely, and port names change
+  when a board moves to a different USB socket.
+- `-device-serial`: USB serial number of the bridge. Normally unnecessary: it
+  is learned on first run and persisted.
 - `-rate`: movement send rate in Hz (default `45`).
 - `-deadzone`: ignore move deltas up to this absolute value (default `1`).
 - `-smooth`: micro-smoothing factor for small movement (default `0.2`).

@@ -14,7 +14,7 @@ import (
 // diagnostics mode, usable on any OS.
 func runCLI(cfg config.Config) error {
 	events := make(chan device.Event, 64)
-	link := device.New(events, cfg.PortOverride)
+	link := device.New(events, cfg.PortOverride, cfg.DeviceSerial)
 	go link.Run()
 	defer link.Close()
 
@@ -27,6 +27,16 @@ func runCLI(cfg config.Config) error {
 		case <-interrupt:
 			return nil
 		case event := <-events:
+			// Persist here too, not just in the GUI: -cli is how the bridge is
+			// first identified on a headless or freshly-set-up machine, and a
+			// binding that is not written down would be rediscovered — and the
+			// user's other ESP32s re-probed — on every launch.
+			if event.Kind == device.EventDeviceLearned && event.Serial != "" {
+				cfg.DeviceSerial = event.Serial
+				if err := config.SaveDeviceSerial(event.Serial); err != nil {
+					log.Printf("could not save device binding: %v", err)
+				}
+			}
 			logEvent(event)
 		}
 	}
@@ -36,6 +46,14 @@ func logEvent(event device.Event) {
 	switch event.Kind {
 	case device.EventConnected:
 		log.Printf("serial connected on %s", event.Port)
+	case device.EventDiscovering:
+		log.Printf("discovering: %s", event.Detail)
+	case device.EventDeviceLearned:
+		log.Printf("bridge identified: %s — remembered for future runs", event.Detail)
+	case device.EventDeviceAbsent:
+		log.Printf("bridge not connected: %s", event.Detail)
+	case device.EventDeviceAmbiguous:
+		log.Printf("ambiguous: %s", event.Detail)
 	case device.EventDisconnected:
 		log.Printf("serial down: %s", event.Detail)
 	case device.EventHello:

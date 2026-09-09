@@ -8,8 +8,12 @@ runs anywhere.
 
 What's new over the legacy `software/` and `software-macos/`:
 
-- **Zero-config device discovery**: finds the ESP32-C3 by USB VID/PID
-  `303A:1001` — no COM-port guessing, no port picker.
+- **Zero-config device discovery**: finds the ESP32 by USB VID/PID
+  `303A:1001`, then identifies *which* board is the bridge by handshake and
+  remembers its USB serial number. Every Espressif chip with native USB shares
+  that VID/PID, so on a machine with several ESP32s the serial is what keeps
+  the app talking to the right one — and it survives replugging into a
+  different socket, which a port name does not.
 - **Binary, bidirectional protocol**: the GUI shows the device's BLE state
   ("Advertising — pair the phone…" / "Connected") and firmware version, and
   has a **Clear device bonds** button for stale-pairing recovery.
@@ -239,7 +243,7 @@ modifier-key reconciliation match what the firmware expects.
 | Path | Role |
 |---|---|
 | `internal/protocol` | Wire codec (frames, CRC-8, message types) |
-| `internal/device` | Serial link: VID/PID discovery, reconnect, PING liveness |
+| `internal/device` | Serial link: device identification, reconnect, PING liveness |
 | `internal/core` | Movement accumulator, shaper, backpressure, key tracker |
 | `internal/config` | Config struct, flags, persisted settings |
 | `internal/keymap` | Windows VK and macOS CGKeyCode → HID usage tables |
