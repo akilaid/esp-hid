@@ -163,9 +163,26 @@ func (g *darwinGUI) applyEvent(event bridge.Event) {
 	case bridge.EventStarting:
 		setStatus("Starting — looking for device…", "", "", "")
 	case bridge.EventSerialConnected:
-		setStatus("Running", event.Port, "", "")
+		setStatus("Running", DeviceText(event.Serial, event.Port), "", "")
 	case bridge.EventSerialDown:
 		setStatus("Waiting for device (USB)…", "-", "", "-")
+	case bridge.EventDiscovering:
+		setStatus("Identifying device…", "", "", "")
+		log.Printf("device discovery: %s", event.Detail)
+	case bridge.EventDeviceLearned:
+		// Remember which board this is. Without this the next launch would
+		// rediscover it, and re-probe the user's other ESP32s to do so.
+		g.cfg.DeviceSerial = event.Serial
+		if err := config.SaveDeviceSerial(event.Serial); err != nil {
+			log.Printf("could not save device binding: %v", err)
+		}
+		setStatus("", DeviceText(event.Serial, event.Port), "", "")
+	case bridge.EventDeviceAbsent:
+		setStatus("Bridge not connected", DeviceText(event.Serial, "")+" (absent)", "-", "-")
+		log.Printf("bridge absent: %s", event.Detail)
+	case bridge.EventDeviceAmbiguous:
+		setStatus("Several bridges found — leave one attached", "-", "-", "-")
+		log.Printf("ambiguous bridge: %s", event.Detail)
 	case bridge.EventHello:
 		setStatus("", "", FirmwareText(event.Hello), "")
 	case bridge.EventBleState:
@@ -280,6 +297,22 @@ func goGuiStopClicked() {
 	// Stop blocks until the pipeline unwinds; doing that on the main thread
 	// would freeze the UI.
 	go app.runtime.Stop()
+}
+
+//export goGuiForgetDeviceClicked
+func goGuiForgetDeviceClicked() {
+	if app.runtime.Running() {
+		// The button is disabled while running; this is belt and braces.
+		return
+	}
+	// Drops the learned binding so the next Start re-identifies the bridge by
+	// handshake. This is the way out of "never substitute": swap in a
+	// replacement board, forget, start, and it binds to the new one.
+	app.cfg.DeviceSerial = ""
+	if err := config.Save(app.cfg); err != nil {
+		log.Printf("settings save failed: %v", err)
+	}
+	setStatus("Device forgotten — press Start to detect again", "-", "-", "-")
 }
 
 //export goGuiClearBondsClicked

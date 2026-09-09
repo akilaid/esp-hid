@@ -22,6 +22,7 @@ const (
 // Config is the resolved runtime configuration.
 type Config struct {
 	PortOverride    string        // empty = auto-discover by USB VID/PID
+	DeviceSerial    string        // bridge's USB serial; learned, not typed
 	MoveRateHz      int           // movement send rate
 	MoveDeadzone    int           // per-axis deadzone in pixels
 	MoveSmoothing   float64       // micro-smoothing factor [0,1)
@@ -71,6 +72,8 @@ func Parse(args []string) (Config, error) {
 
 	fs := flag.NewFlagSet("esp-hid-bridge", flag.ContinueOnError)
 	port := fs.String("port", cfg.PortOverride, "serial port (default: auto-detect by USB VID/PID 303A:1001)")
+	deviceSerial := fs.String("device-serial", cfg.DeviceSerial,
+		"USB serial number of the bridge (default: learned automatically on first run)")
 	rate := fs.Int("rate", cfg.MoveRateHz, "maximum move send rate (events per second)")
 	deadzone := fs.Int("deadzone", cfg.MoveDeadzone, "ignore tiny move deltas up to this absolute value (0 disables)")
 	smooth := fs.Float64("smooth", cfg.MoveSmoothing, "micro-smoothing factor for small movement (0 disables)")
@@ -91,6 +94,7 @@ func Parse(args []string) (Config, error) {
 	}
 
 	cfg.PortOverride = *port
+	cfg.DeviceSerial = *deviceSerial
 	cfg.MoveRateHz = *rate
 	cfg.MoveDeadzone = *deadzone
 	cfg.MoveSmoothing = *smooth

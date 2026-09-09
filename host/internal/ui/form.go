@@ -119,6 +119,27 @@ func BleStateText(state protocol.BleState) string {
 	}
 }
 
+// DeviceText words the connected bridge for the status line. The serial number
+// leads because it is the board's identity — the one thing that tells the user
+// which of their ESP32s this is. The port name follows as the incidental
+// detail it is: it changes whenever the board moves to another USB socket.
+func DeviceText(serial, port string) string {
+	short := port
+	if i := strings.LastIndexByte(short, '/'); i >= 0 {
+		short = short[i+1:]
+	}
+	switch {
+	case serial == "" && short == "":
+		return "-"
+	case serial == "":
+		return short
+	case short == "":
+		return serial
+	default:
+		return serial + " · " + short
+	}
+}
+
 // FirmwareText renders the device's HELLO for the status line.
 func FirmwareText(hello protocol.Hello) string {
 	return fmt.Sprintf("%d.%d.%d (protocol v%d)",

@@ -94,10 +94,42 @@ Pipeline, per run:
    `core.MovementShaper` (deadzone + micro-smoothing) and `core.Backpressure`
    (drops MOVEs when the queue is congested), and enqueues encoded frames.
    `core.KeyTracker` de-dupes auto-repeat.
-3. **`internal/device`** — finds the C3 by USB VID/PID, owns the serial
+3. **`internal/device`** — identifies the board (see below), owns the serial
    session, auto-reconnect, and a 1 Hz PING / 3-missed-PONG liveness check.
    Its queue is lossy by design: `EnqueueMove` drops when full, `Enqueue`
    evicts to make room (clicks and key releases must not be lost).
+
+### Device identification
+`303A:1001` is shared by **every** Espressif chip with native USB, so it
+narrows the field but never names a board. Picking the first match is a silent
+misroute: the wrong ESP32 opens fine and answers `HELLO`, because `HELLO`
+carries only compile-time constants.
+
+The identity is the **USB serial number**, which an Espressif ROM descriptor
+reports as the board's factory MAC. `internal/device/discover.go` holds the whole of
+it: `normalizeSerial`, the pure `selectPort`, and `probe`.
+
+- Unbound, the app probes each candidate with **one** `GET_STATUS` (5 bytes,
+  `AA 55 02 00 2A`, no `0x0A`/`0x0D` so a foreign REPL cannot execute it),
+  learns the responder's serial and persists it. Bound, it never probes again.
+- **Never substitute.** If the bound board is absent the app waits, even when
+  exactly one other board is attached. `TestBoundAbsentNeverProbes` pins this.
+- The probe cache is the safety property: `Run` retries every 750 ms, so
+  without it the user's other boards would be written to several times a
+  second. Cache a board once it has been *written to*; never cache a refused
+  open (nothing was written, and the busy port may be the bridge itself).
+- **`openWithTimeout` is not defensive padding.** A wedged CDC endpoint hangs
+  `open()` forever — measured, and `O_NONBLOCK` does not help — which would
+  hang the reconnect loop and the whole app. Such a board is cached and skipped.
+- Do **not** pass `serial.Mode.InitialStatusBits`. It looks like cheap
+  hardening; it makes the library issue a `TIOCMSET` ioctl that never returns
+  on an Espressif USB CDC endpoint. Nil skips the ioctl, which is what `session()`
+  has always done.
+- Persist via `config.SaveDeviceSerial`, never `config.Save(cfg)`: `-cli` and
+  `-gui=false` force `GUIMode` false, so writing the whole config back after a
+  diagnostic run would silently make the app launch headless from then on.
+- `EventDeviceLearned` is emitted with `emitBlocking`. `emit` drops on a full
+  channel, and losing this event un-learns the device.
 
 ### The seam
 `capture.Run(ctx, Options, chan<- Event, activationAllowedFn) error` is the

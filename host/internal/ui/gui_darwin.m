@@ -6,6 +6,7 @@
 extern void goGuiStartClicked(void);
 extern void goGuiStopClicked(void);
 extern void goGuiClearBondsClicked(void);
+extern void goGuiForgetDeviceClicked(void);
 extern void goGuiGrantClicked(void);
 extern void goGuiOpenSettingsClicked(void);
 extern void goGuiTick(void);
@@ -41,6 +42,7 @@ static NSButton *gSettingsButton = nil;
 static NSButton *gStartButton = nil;
 static NSButton *gStopButton = nil;
 static NSButton *gBondsButton = nil;
+static NSButton *gForgetButton = nil;
 
 static NSTextField *gHotkeyField = nil;
 static NSTextField *gRateField = nil;
@@ -114,6 +116,11 @@ static NSBox *makeBox(NSView *parent, NSString *title, CGFloat y,
 - (void)stopClicked:(id)sender {
   (void)sender;
   goGuiStopClicked();
+}
+
+- (void)forgetClicked:(id)sender {
+  (void)sender;
+  goGuiForgetDeviceClicked();
 }
 
 - (void)bondsClicked:(id)sender {
@@ -303,8 +310,13 @@ static void buildWindow(void) {
 
   gStartButton = makeButton(sv, @"Start", 0, 16, 100, @selector(startClicked:));
   gStopButton = makeButton(sv, @"Stop", 110, 16, 100, @selector(stopClicked:));
-  gBondsButton = makeButton(sv, @"Clear device bonds", sw - 190, 16, 190,
+  // Both device-maintenance actions share the row's right-hand side. Bonds is
+  // narrowed to 170 so "Forget device" clears the Stop button, which ends at
+  // x=210; the layout here is hand-placed absolute frames.
+  gBondsButton = makeButton(sv, @"Clear device bonds", sw - 170, 16, 170,
                             @selector(bondsClicked:));
+  gForgetButton = makeButton(sv, @"Forget device", sw - 330, 16, 150,
+                             @selector(forgetClicked:));
   [gStopButton setEnabled:NO];
 
   // --- Input Settings -----------------------------------------------------
@@ -448,6 +460,9 @@ void ehbGuiSetRunning(int running) {
   [gModeControl setEnabled:running ? NO : YES];
   [gResolutionCombo setEnabled:running ? NO : YES];
   [gHostSidePopup setEnabled:running ? NO : YES];
+  // Forgetting the bound board mid-session would leave the running link
+  // pointing at a device the settings no longer name.
+  [gForgetButton setEnabled:running ? NO : YES];
 }
 
 void ehbGuiSetRemoteActive(int active) {

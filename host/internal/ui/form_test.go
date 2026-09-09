@@ -206,6 +206,23 @@ func TestBleStateText(t *testing.T) {
 	}
 }
 
+func TestDeviceText(t *testing.T) {
+	cases := []struct {
+		serial, port, want string
+	}{
+		{"AA:BB:CC:00:00:33", "/dev/cu.usbmodem3301", "AA:BB:CC:00:00:33 · cu.usbmodem3301"},
+		{"AA:BB:CC:00:00:33", "", "AA:BB:CC:00:00:33"},
+		{"", "/dev/cu.usbmodem3301", "cu.usbmodem3301"},
+		{"", "COM7", "COM7"},
+		{"", "", "-"},
+	}
+	for _, c := range cases {
+		if got := DeviceText(c.serial, c.port); got != c.want {
+			t.Errorf("DeviceText(%q, %q) = %q, want %q", c.serial, c.port, got, c.want)
+		}
+	}
+}
+
 func TestFirmwareText(t *testing.T) {
 	got := FirmwareText(protocol.Hello{ProtoVersion: 1, FwMajor: 1, FwMinor: 2, FwPatch: 3})
 	if got != "1.2.3 (protocol v1)" {
