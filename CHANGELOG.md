@@ -1,0 +1,161 @@
+# Changelog
+
+All notable changes to this project, newest first. Versions follow
+[semantic versioning](https://semver.org/spec/v2.0.0.html).
+
+The project has two generations. **2.x** is the current one: ESP-IDF firmware
+(`firmware-idf/`) with a Go host app (`host/`). **1.x** was the Arduino sketch
+(`firmware/`) with a Windows-only sender (`software/`); it speaks a different
+wire protocol, is not interchangeable with 2.x, and is no longer released.
+
+## [2.1.0] — 2026-09-09
+
+### Added
+
+- The host identifies its own board by USB serial number and remembers it, so
+  several ESP32s can share a machine without the app driving the wrong one. The
+  serial is learned by handshake on first run and stored in `settings-v2.json`;
+  it is never typed in. ([#10](https://github.com/akilaid/esp-hid/issues/10))
+- **Forget device** button in both GUIs, to re-identify after swapping boards.
+- `-device-serial` flag, for pinning the board without the GUI.
+- Status line now names the bound board, and distinguishes "bridge not
+  connected" from "no device attached".
+- A `VERSION` file the release workflow honours, so minor and major bumps can
+  be expressed in-repo. Without it the pipeline could only increment the patch.
+
+### Changed
+
+- Documentation no longer describes the host as tied to one ESP32 variant. The
+  app is chip-agnostic and works with any Espressif board that exposes a native
+  USB Serial/JTAG port; prebuilt firmware images remain compiled for the C3.
+- `-port` is documented as a debugging escape hatch. Port names are derived
+  from USB topology and change when a board moves socket, so they are not a
+  stable way to select hardware.
+
+### Fixed
+
+- The app no longer picks an arbitrary board when several are attached. It
+  previously took the first USB `303A:1001` match in enumeration order, which
+  is neither sorted nor stable, and the mistake was silent: the wrong board
+  opened, answered, and reported a healthy status.
+- A board whose USB CDC endpoint is wedged no longer hangs startup. Such a port
+  can block `open()` indefinitely at the kernel level, which stalled the
+  reconnect loop; it is now skipped after a timeout.
+- Running `-cli` or `-gui=false` no longer persists `guiMode: false`, which
+  made later launches headless. Only the learned device binding is written.
+
+## [2.0.10] — 2026-08-03
+
+- Edge switching returns to macOS, armed by push pressure so the Dock, menu bar
+  and window controls on the same borders do not trigger it.
+
+## [2.0.9] — 2026-08-03
+
+- Updated menu bar artwork.
+
+## [2.0.8] — 2026-08-03
+
+- The local pointer is hidden and pinned without the app needing the
+  foreground, so a minimized window no longer moves the local cursor.
+- Menu bar uses the drawn on/off art, in colour.
+
+## [2.0.7] — 2026-08-03
+
+- Order a window front so the foreground grab works when minimized.
+
+## [2.0.6] — 2026-08-03
+
+- Hold the foreground on macOS so the local cursor stays put.
+- Give the focus shim a real GOOS suffix so Linux CI skips it.
+
+## [2.0.5] — 2026-08-01
+
+- Releases are cut by merging to main; the legacy v1 pipeline is deleted. It
+  built the v1 app from the same tag namespace, so running it would have
+  published a v1 binary under a 2.x tag.
+- Auto switching dropped from the macOS GUI (restored in 2.0.10).
+- Hotkeys extended to F13–F20.
+
+## [2.0.4] — 2026-08-01
+
+- Fixed macOS edge switching bouncing straight back out.
+
+## [2.0.3] — 2026-08-01
+
+- macOS ships as a drag-to-install disk image.
+- Corrected the macOS Gatekeeper instructions.
+
+## [2.0.2] — 2026-08-01
+
+- Native macOS support in the 2.x host app. The retired 1.x macOS app spoke the
+  old newline-text protocol and could not talk to the ESP-IDF firmware.
+
+## [2.0.1] — 2026-07-29
+
+- Fixed a silent GUI startup failure by embedding the Common Controls 6
+  manifest.
+
+## [2.0.0] — 2026-07-29
+
+- ESP-IDF firmware rewrite and a new Go host app, on a binary framed wire
+  protocol with device→host reporting (BLE state, firmware version, errors).
+- Fixed macOS serial port auto-detection.
+
+## [1.0.6] — 2026-06-10
+
+- BLE HID ported to NimBLE, adding ESP32-C3/S3 support.
+- macOS ESP HID Bridge implementation.
+- Restored 460800 baud and a fast BLE connection interval.
+- Demo GIF added to the README.
+
+## [1.0.5] — 2026-03-18
+
+- Modifier hotkeys, and auto/manual switching.
+
+## [1.0.4] — 2026-03-16
+
+- Settings persisted; default serial baud raised.
+- Connection LED indicator for BLE status.
+- Host-side dropdown replaced with a drag layout widget.
+- Edge-aware host return and an optional left-swipe.
+- Arduino CLI build and flash instructions.
+
+## [1.0.3] — 2026-03-16
+
+- System cursor visibility managed in remote mode.
+- Monitor detection and leftward return.
+- Serial baud, BLE parameters and input shaping tuned.
+
+## [1.0.2] — 2026-03-15
+
+- Release workflow fix.
+
+## [1.0.1] — 2026-03-15
+
+- Windows icons embedded and loaded from resources.
+
+## [1.0.0] — 2026-03-15
+
+- First release: ESP32 BLE HID firmware and a Windows sender, with a GUI, tray
+  icon, configurable toggle hotkey, remote-mode mouse and button handling, and
+  a build/release workflow.
+
+[2.1.0]: https://github.com/akilaid/esp-hid/compare/v2.0.10...v2.1.0
+[2.0.10]: https://github.com/akilaid/esp-hid/compare/v2.0.9...v2.0.10
+[2.0.9]: https://github.com/akilaid/esp-hid/compare/v2.0.8...v2.0.9
+[2.0.8]: https://github.com/akilaid/esp-hid/compare/v2.0.7...v2.0.8
+[2.0.7]: https://github.com/akilaid/esp-hid/compare/v2.0.6...v2.0.7
+[2.0.6]: https://github.com/akilaid/esp-hid/compare/v2.0.5...v2.0.6
+[2.0.5]: https://github.com/akilaid/esp-hid/compare/v2.0.4...v2.0.5
+[2.0.4]: https://github.com/akilaid/esp-hid/compare/v2.0.3...v2.0.4
+[2.0.3]: https://github.com/akilaid/esp-hid/compare/v2.0.2...v2.0.3
+[2.0.2]: https://github.com/akilaid/esp-hid/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/akilaid/esp-hid/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/akilaid/esp-hid/compare/v1.0.6...v2.0.0
+[1.0.6]: https://github.com/akilaid/esp-hid/compare/v1.0.5...v1.0.6
+[1.0.5]: https://github.com/akilaid/esp-hid/compare/v1.0.4...v1.0.5
+[1.0.4]: https://github.com/akilaid/esp-hid/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/akilaid/esp-hid/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/akilaid/esp-hid/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/akilaid/esp-hid/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/akilaid/esp-hid/releases/tag/v1.0.0

@@ -62,8 +62,26 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
+          # A VERSION file is how a minor or major bump gets expressed. The
+          # automatic path below only ever increments the patch, so without
+          # this there is no way to release anything but vX.Y.(Z+1).
+          #
+          # When VERSION names a tag that does not exist yet, that is the
+          # release. Once the tag exists the file goes inert and ordinary
+          # merges resume bumping the patch from the latest tag, so it never
+          # has to be reset — leave it naming the last deliberate bump.
+          desired=""
+          if [ -f VERSION ]; then
+            desired="$(tr -d '[:space:]' < VERSION)"
+          fi
+          if [ -n "$desired" ] && ! [[ "$desired" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION must be X.Y.Z, got: $desired" >&2
+            exit 1
+          fi
           latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
-          if [ -z "$latest" ]; then
+          if [ -n "$desired" ] && ! git rev-parse -q --verify "refs/tags/v$desired" >/dev/null; then
+            next="v$desired"
+          elif [ -z "$latest" ]; then
             next="v2.0.0"
           elif [[ "$latest" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             major="${BASH_REMATCH[1]}"
