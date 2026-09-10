@@ -156,16 +156,32 @@ jobs:
 
   build-firmware:
     runs-on: ubuntu-latest
-    needs: test
+    # meta, not test: the firmware reports its version in HELLO, and that has
+    # to be the tag the release job is about to create. Git cannot supply it —
+    # the tag does not exist until after this build — so it comes from meta.
+    # (meta itself needs test, so the gate is unchanged.)
+    needs: meta
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PROJECT_VER falls back to git describe, which needs the history.
+          fetch-depth: 0
+          fetch-tags: true
       - name: Build firmware (ESP-IDF, esp32c3)
         uses: espressif/esp-idf-ci-action@v1
+        env:
+          BRIDGE_FW_VERSION: ${{ needs.meta.outputs.tag }}
         with:
           esp_idf_version: v6.0
           target: esp32c3
           path: firmware-idf
+          # Passed as a CMake cache entry as well as an env var: the action
+          # builds inside a container, and this way the version arrives
+          # whichever of the two the container forwards. If neither did,
+          # main/CMakeLists.txt still falls back to git describe, so the
+          # firmware would report the previous release rather than nothing.
+          command: idf.py -D BRIDGE_FW_VERSION=${{ needs.meta.outputs.tag }} build
       - name: Package firmware images
         run: |
           mkdir -p firmware-out
