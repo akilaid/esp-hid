@@ -93,6 +93,11 @@ times out the host; it just answers what it receives.
 
 - **HELLO** is sent once on boot and in reply to every `GET_STATUS`.
   `proto_ver` = 1. `caps` bit0 = mouse, bit1 = keyboard (both set).
+  `fw_major`/`fw_minor`/`fw_patch` are the **release version**, derived at
+  build time from the release tag (see `main/CMakeLists.txt`) — not the
+  protocol version, which is `proto_ver` and moves independently. A build from
+  an untagged commit reports the release it descends from; `0.0.0` means the
+  build system supplied no version at all.
 - **BLE_STATE** is sent on every state change and after HELLO in the
   `GET_STATUS` reply. `state`: 0 = idle (BLE down), 1 = advertising,
   2 = connected. `reason` = BLE disconnect reason of the most recent
