@@ -53,10 +53,28 @@ chip**, so device state survives host reconnects — the host must send
 get_idf                     # or: . $IDF_PATH/export.sh
 idf.py set-target esp32c3   # first time only
 idf.py build
-idf.py -p /dev/cu.usbmodem* flash
+idf.py -p /dev/cu.usbmodemXXXX flash   # name the port; see below
 ```
 Test without the GUI app: `tools/hidctl.py status` (needs a venv at
 `tools/.venv` with pyserial).
+
+Three traps here, each of which has already cost real debugging time:
+
+- **`sdkconfig.defaults` does not apply to an existing `sdkconfig`.** It seeds
+  that file once. Editing defaults on a tree that has already been configured
+  changes nothing — edit `sdkconfig` too (it is gitignored), or delete it and
+  reconfigure. A config change that appears to have no effect is this.
+- **Always pass an explicit `-p`.** Auto-detect picks whichever Espressif board
+  answers first, and every native-USB Espressif chip shares `303A:1001` — the
+  same ambiguity `internal/device` exists to solve. On a machine with several
+  boards it will flash the wrong one; only esptool's chip-ID check catches it,
+  and only when the chips differ. Do not rely on a `/dev/cu.usbmodem*` glob.
+- **Panics are invisible over USB.** The console is UART0 (GPIO20/21) and the
+  secondary USB console is disabled so nothing but protocol frames touch the
+  CDC port, so a crash looks like a silent boot loop. To read a panic,
+  temporarily set `CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y` in
+  `sdkconfig`, reflash, and read the port as plain text — the frame decoder
+  resyncs around the interleaved console output. Revert it afterwards.
 
 ### Host (from `host/`)
 ```bash

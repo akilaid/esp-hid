@@ -19,6 +19,16 @@ CONFIG_BT_NIMBLE_SM_SC=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
 
+# --- Task stacks ---
+# esp_hidd_dev_init() parses the report map and registers a GATT
+# characteristic per report, all on the caller's stack — which is app_main's.
+# The IDF default of 3584 leaves so little headroom that adding ONE report to
+# hid_report_map overflows it, and the failure is invisible: the panic is a
+# stack protection fault written to the UART0 console, which nothing is
+# listening to, so the board just boot-loops with no output over USB. Measured
+# while prototyping an extra report; 8192 costs ~4.5 KB of ~164 KB free.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 # --- Console ---
 # The USB Serial/JTAG CDC port carries the binary bridge protocol; nothing
 # else may write to it. Logs go to UART0 (TX=GPIO21, RX=GPIO20). The C3
