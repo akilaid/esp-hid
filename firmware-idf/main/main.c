@@ -16,9 +16,29 @@
 
 static const char *TAG = "bridge";
 
-#define FW_MAJOR 1
-#define FW_MINOR 0
-#define FW_PATCH 0
+// Supplied by the build — see main/CMakeLists.txt, which derives these from
+// the release tag (or from git describe for a local build). Do not hardcode
+// them here again: they were fixed at 1.0.0 and drifted for eleven releases
+// while the GUI cheerfully reported it.
+#ifndef BRIDGE_FW_MAJOR
+#define BRIDGE_FW_MAJOR 0
+#endif
+#ifndef BRIDGE_FW_MINOR
+#define BRIDGE_FW_MINOR 0
+#endif
+#ifndef BRIDGE_FW_PATCH
+#define BRIDGE_FW_PATCH 0
+#endif
+
+#define FW_MAJOR BRIDGE_FW_MAJOR
+#define FW_MINOR BRIDGE_FW_MINOR
+#define FW_PATCH BRIDGE_FW_PATCH
+
+// HELLO carries one byte per component, so a version that does not fit would
+// wrap silently into something plausible. Fail the build instead.
+_Static_assert(FW_MAJOR >= 0 && FW_MAJOR <= 255, "FW_MAJOR does not fit in HELLO's u8");
+_Static_assert(FW_MINOR >= 0 && FW_MINOR <= 255, "FW_MINOR does not fit in HELLO's u8");
+_Static_assert(FW_PATCH >= 0 && FW_PATCH <= 255, "FW_PATCH does not fit in HELLO's u8");
 
 // caps bit0 = mouse, bit1 = keyboard.
 #define FW_CAPS 0x0003
