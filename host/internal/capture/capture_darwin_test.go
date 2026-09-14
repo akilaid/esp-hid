@@ -138,19 +138,7 @@ func TestIntegrationEdgeEntryPersists(t *testing.T) {
 	}()
 	time.Sleep(500 * time.Millisecond)
 
-	// Sweep leftward into the entry edge.
-	syntheticMouseMove(-5, 0)
-	time.Sleep(100 * time.Millisecond)
-
-	// Arriving is not enough any more: entry is armed by pushing against the
-	// border, so this has to keep shoving outward the way a real hand would.
-	// One touch deliberately does nothing — that is the whole point of the
-	// gate, and TestIntegrationEdgeTouchAloneDoesNotEnter covers it.
-	steps := (edgeEntryPressureThreshold / 40) + 2
-	for i := 0; i < steps; i++ {
-		syntheticMouseMoveTo(0, 400, -40)
-		time.Sleep(10 * time.Millisecond)
-	}
+	pushIntoLeftEdge(400)
 	// Hold: any spurious motion in this window would trip the return.
 	time.Sleep(1200 * time.Millisecond)
 
@@ -185,6 +173,103 @@ func TestIntegrationEdgeEntryPersists(t *testing.T) {
 		t.Errorf("remote mode deactivated on its own %d events after entry; "+
 			"entering must not emit motion that trips the return-pressure model",
 			deactivatedAt-activatedAt)
+	}
+}
+
+// pushIntoLeftEdge drives an edge entry on the main display's left border at
+// row y, the way a real hand would.
+//
+// Arriving is not enough: entry is armed by pushing against the border, so
+// this has to keep shoving outward. One touch deliberately does nothing —
+// that is the whole point of the gate, and
+// TestIntegrationEdgeTouchAloneDoesNotEnter covers it.
+func pushIntoLeftEdge(y float64) {
+	// Sweep leftward into the entry edge.
+	syntheticMouseMove(-5, 0)
+	time.Sleep(100 * time.Millisecond)
+
+	steps := (edgeEntryPressureThreshold / 40) + 2
+	for i := 0; i < steps; i++ {
+		syntheticMouseMoveTo(0, y, -40)
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestIntegrationEdgeExitReturnsToEntryRow checks the pointer comes back level
+// with where it crossed over, not at the middle of the edge. The return is
+// computed from the recorded entry point; the monitor is still found from the
+// centre anchor, so this also confirms the two agree on the main display.
+func TestIntegrationEdgeExitReturnsToEntryRow(t *testing.T) {
+	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
+		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
+	}
+	if perms := CheckPermissions(); !perms.OK(true) {
+		t.Skipf("missing permissions: %s", perms.PermissionHint(true))
+	}
+
+	events := make(chan Event, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Options{
+			CaptureKeyboard: true,
+			ToggleHotkey:    "F9",
+			SlaveWidth:      1080,
+			SlaveHeight:     1920,
+			HostSide:        HostSideRight,
+			AutoSwitch:      true,
+		}, events, func() bool { return true })
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	// Well away from the centre row so a centre landing is unmistakable.
+	const entryRow = 400
+	pushIntoLeftEdge(entryRow)
+	time.Sleep(300 * time.Millisecond)
+
+	syntheticKey(testKeyF9, true)
+	syntheticKey(testKeyF9, false)
+	time.Sleep(300 * time.Millisecond)
+	landed, _ := currentCursorPoint()
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+	close(events)
+
+	entered, exited := false, false
+	for event := range events {
+		if event.Kind != EventRemoteMode {
+			continue
+		}
+		if event.Active && event.Source == "edge" {
+			entered = true
+		} else if !event.Active && entered && event.Source == "hotkey" {
+			exited = true
+		}
+	}
+	if !entered {
+		t.Fatal("reaching the host-side edge did not activate remote mode")
+	}
+	if !exited {
+		t.Fatal("F9 did not deactivate remote mode")
+	}
+
+	// Host on the right => the pointer returns just inside the left border of
+	// the main display, on the row it left from.
+	if landed.X != 1 {
+		t.Errorf("returned at x=%d, want 1 (just inside the left border)", landed.X)
+	}
+	if diff := landed.Y - entryRow; diff < -2 || diff > 2 {
+		t.Errorf("returned at y=%d, want %d (the entry row), not the edge centre", landed.Y, entryRow)
 	}
 }
 

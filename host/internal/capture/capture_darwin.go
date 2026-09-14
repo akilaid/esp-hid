@@ -80,7 +80,12 @@ type session struct {
 	cursorHidden     bool
 	edgeArmed        bool
 	hotkeyDown       bool
-	remoteAnchor     point
+	// remoteAnchor is the monitor centre, the key that re-finds the entry
+	// monitor on exit (and, on Windows, the pin point too). entryPoint is
+	// where the pointer actually crossed, so the return lands on that row or
+	// column instead of the middle of the edge.
+	remoteAnchor point
+	entryPoint   point
 	// Where the local pointer is held while remote mode is active: wherever
 	// it happened to be on entry, so entering never moves it.
 	pinPoint     point
@@ -147,6 +152,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 		sess.setAnchorForPoint(cursor)
 	} else {
 		sess.remoteAnchor = sess.virtualDesktopRect().centerPoint()
+		sess.entryPoint = sess.remoteAnchor
 	}
 	sess.slaveCursor.resetForActivation("hotkey")
 
@@ -270,7 +276,7 @@ func (s *session) disableRemoteIfDisconnected() {
 	if !s.remoteModeActive || s.activationAllowed() {
 		return
 	}
-	s.exitRemote(s.returnToHostPointForAnchor(s.remoteAnchor), "serial")
+	s.exitRemote(s.returnToHostPoint(), "serial")
 	s.edgeArmed = true
 	s.leftward.reset()
 	s.slaveCursor.resetPressure()
@@ -318,7 +324,7 @@ func (s *session) handleMouseMove(event C.CGEventRef) C.CGEventRef {
 		shouldReturn = s.leftward.update(dx, dy, time.Now())
 	}
 	if shouldReturn {
-		s.exitRemote(s.returnToHostPointForAnchor(s.remoteAnchor), "slave_edge")
+		s.exitRemote(s.returnToHostPoint(), "slave_edge")
 		s.edgeArmed = false
 		s.leftward.reset()
 		s.slaveCursor.resetPressure()
@@ -453,7 +459,7 @@ func (s *session) handleKey(event C.CGEventRef, down bool) C.CGEventRef {
 
 func (s *session) toggleRemoteMode() {
 	if s.remoteModeActive {
-		s.exitRemote(s.returnToHostPointForAnchor(s.remoteAnchor), "hotkey")
+		s.exitRemote(s.returnToHostPoint(), "hotkey")
 	} else {
 		if cursor, ok := s.cursorPoint(); ok {
 			s.setAnchorForPoint(cursor)
@@ -596,6 +602,12 @@ func (s *session) restoreCursor() {
 }
 
 func (s *session) cursorPoint() (point, bool) {
+	return currentCursorPoint()
+}
+
+// currentCursorPoint is package-level so a _test.go file, which cannot use
+// cgo, can still observe where the pointer landed.
+func currentCursorPoint() (point, bool) {
 	var x, y C.double
 	C.ehbCursorPosition(&x, &y)
 	return point{X: int32(x), Y: int32(y)}, true
@@ -677,14 +689,15 @@ func (s *session) canActivateFromHostEdge(p point) bool {
 	return isOuterActivationEdgePoint(p, rect, s.monitorRects, s.hostSide)
 }
 
-func (s *session) returnToHostPointForAnchor(current point) point {
+func (s *session) returnToHostPoint() point {
 	if rect, found := s.findMonitor(s.remoteAnchor); found {
-		return returnPointInRect(current, rect, s.hostSide)
+		return returnPointInRect(s.entryPoint, rect, s.hostSide)
 	}
-	return returnPointInRect(current, s.virtualDesktopRect(), s.hostSide)
+	return returnPointInRect(s.entryPoint, s.virtualDesktopRect(), s.hostSide)
 }
 
 func (s *session) setAnchorForPoint(p point) {
+	s.entryPoint = p
 	if rect, found := s.findMonitor(p); found {
 		s.remoteAnchor = rect.centerPoint()
 		return

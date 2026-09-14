@@ -183,6 +183,12 @@ cursor *exactly on* the activation edge for all four host sides, so
 disarm stops an immediate re-entry loop. Pressure narrows that window but must
 never become the only guard.
 
+The return lands level with the recorded crossing point (`entryPoint`), not the
+middle of the edge. `remoteAnchor` stays the monitor *centre* on purpose: it is
+the Windows pin point and delta origin while remote, and on both platforms it
+is the key that re-finds the entry monitor on exit. Feed `returnPointInRect`
+the entry point, never the anchor.
+
 ### macOS specifics
 Four things the implementation must keep doing, the first three each fixing a
 defect in the retired v1 macOS app:

@@ -323,6 +323,11 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 	edgeArmed := true
 	hotkeyDown := false
 	remoteAnchor := virtualCenterPoint()
+	// remoteAnchor is the monitor centre: the pin point and delta origin while
+	// remote, and the key that re-finds the entry monitor on exit. entryPoint
+	// is where the pointer actually crossed, so the return lands on that row
+	// or column instead of the middle of the edge.
+	entryPoint := remoteAnchor
 
 	defer func() {
 		if systemCursorHidden {
@@ -378,13 +383,14 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 		}
 		return isOuterActivationEdgePoint(p, rect, monitorRects, hostSide)
 	}
-	returnToHostPointForAnchor := func(current point) point {
+	returnToHostPoint := func() point {
 		if rect, found := findMonitor(remoteAnchor); found {
-			return returnPointInRect(current, rect, hostSide)
+			return returnPointInRect(entryPoint, rect, hostSide)
 		}
-		return returnPointInRect(current, virtualDesktopRect(), hostSide)
+		return returnPointInRect(entryPoint, virtualDesktopRect(), hostSide)
 	}
 	setRemoteAnchorForPoint := func(p point) {
+		entryPoint = p
 		if rect, found := findMonitor(p); found {
 			remoteAnchor = rect.centerPoint()
 			return
@@ -412,7 +418,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 		if activationAllowed() {
 			return
 		}
-		returnPoint := returnToHostPointForAnchor(remoteAnchor)
+		returnPoint := returnToHostPoint()
 		setCursorPosition(returnPoint.X, returnPoint.Y)
 		setRemoteModeActive(false, "serial")
 		edgeArmed = true
@@ -475,7 +481,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 						shouldReturn = leftwardReturn.update(dx, dy, time.Now())
 					}
 					if shouldReturn {
-						returnPoint := returnToHostPointForAnchor(lParam.Pt)
+						returnPoint := returnToHostPoint()
 						setCursorPosition(returnPoint.X, returnPoint.Y)
 						setRemoteModeActive(false, "slave_edge")
 						edgeArmed = false
@@ -547,7 +553,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 								setRemoteModeActive(true, "hotkey")
 								setCursorPosition(remoteAnchor.X, remoteAnchor.Y)
 							} else {
-								returnPoint := returnToHostPointForAnchor(remoteAnchor)
+								returnPoint := returnToHostPoint()
 								setCursorPosition(returnPoint.X, returnPoint.Y)
 								setRemoteModeActive(false, "hotkey")
 							}
