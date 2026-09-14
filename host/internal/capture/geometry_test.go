@@ -80,6 +80,31 @@ func TestReturnPointLandsInsideHostBorder(t *testing.T) {
 	}
 }
 
+func TestReturnPointClampsEntryPointIntoRect(t *testing.T) {
+	// The return is computed in the entry monitor's rect, chosen separately
+	// from the entry point itself. An entry point that lies on another monitor
+	// must be clamped into that rect rather than dragging the cursor across.
+	onB := point{X: 3000, Y: 700}
+	cases := []struct {
+		side string
+		want point
+	}{
+		{HostSideLeft, point{X: 1918, Y: 700}},
+		{HostSideRight, point{X: 1, Y: 700}},
+		{HostSideTop, point{X: 1919, Y: 1}},
+		{HostSideBottom, point{X: 1919, Y: 1078}},
+	}
+	for _, tc := range cases {
+		got := returnPointInRect(onB, monitorA, tc.side)
+		if got != tc.want {
+			t.Errorf("side %s: got %v, want %v", tc.side, got, tc.want)
+		}
+		if !monitorA.containsPoint(got) {
+			t.Errorf("side %s: return point %v escaped %v", tc.side, got, monitorA)
+		}
+	}
+}
+
 func TestReturnPointStaysInsideTinyRect(t *testing.T) {
 	// A degenerate 1px rect must not produce a coordinate outside it.
 	tiny := monitorRect{Left: 10, Top: 10, Right: 11, Bottom: 11}
