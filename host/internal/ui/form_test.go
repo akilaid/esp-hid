@@ -238,3 +238,93 @@ func TestIndexOf(t *testing.T) {
 		t.Errorf("IndexOf(missing) = %d, want -1", got)
 	}
 }
+
+func TestOrientationIndexOf(t *testing.T) {
+	cases := []struct {
+		resolution string
+		want       int
+	}{
+		{"1080x2400", OrientationPortrait},
+		{"2400x1080", OrientationLandscape},
+		{"1000x1000", OrientationPortrait},
+		{" 1440 X 3120 ", OrientationPortrait},
+		{"garbage", -1},
+		{"", -1},
+	}
+	for _, tc := range cases {
+		if got := OrientationIndexOf(tc.resolution); got != tc.want {
+			t.Errorf("OrientationIndexOf(%q) = %d, want %d", tc.resolution, got, tc.want)
+		}
+	}
+}
+
+func TestOrientResolution(t *testing.T) {
+	cases := []struct {
+		resolution  string
+		orientation int
+		want        string
+		ok          bool
+	}{
+		{"1080x2400", OrientationLandscape, "2400x1080", true},
+		{"2400x1080", OrientationPortrait, "1080x2400", true},
+		{"1080x2400", OrientationPortrait, "1080x2400", true}, // already portrait: unchanged
+		{"2400x1080", OrientationLandscape, "2400x1080", true},
+		{"1000x1000", OrientationLandscape, "1000x1000", true}, // square: nothing to swap
+		{"1080x2400", 7, "1080x2400", false},
+		{"not-a-resolution", OrientationPortrait, "not-a-resolution", false},
+	}
+	for _, tc := range cases {
+		got, ok := OrientResolution(tc.resolution, tc.orientation)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("OrientResolution(%q, %d) = %q, %v; want %q, %v",
+				tc.resolution, tc.orientation, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestOrientResolutionRoundTrips(t *testing.T) {
+	// Flipping twice lands back where it started, and the result is always
+	// something Apply accepts.
+	flipped, _ := OrientResolution("1080x2400", OrientationLandscape)
+	back, _ := OrientResolution(flipped, OrientationPortrait)
+	if back != "1080x2400" {
+		t.Fatalf("round trip gave %q", back)
+	}
+	if _, _, err := config.ParseResolution(flipped); err != nil {
+		t.Fatalf("flipped value %q does not parse: %v", flipped, err)
+	}
+}
+
+func TestOrientationChoicesMatchIndices(t *testing.T) {
+	if OrientationChoices[OrientationPortrait] != "Portrait" ||
+		OrientationChoices[OrientationLandscape] != "Landscape" {
+		t.Fatalf("OrientationChoices = %v; the index constants no longer line up", OrientationChoices)
+	}
+}
+
+func TestDeviceMatches(t *testing.T) {
+	if got := DeviceMatches(""); len(got) != 0 {
+		t.Errorf("empty query returned %d matches", len(got))
+	}
+	got := DeviceMatches("galaxy")
+	if len(got) == 0 {
+		t.Fatal("no matches for a common brand")
+	}
+	if len(got) > MaxDeviceMatches {
+		t.Errorf("%d matches exceeds MaxDeviceMatches", len(got))
+	}
+	for _, m := range got {
+		if !strings.HasSuffix(m.Label, "("+m.Resolution+")") {
+			t.Errorf("label %q does not end with its resolution %q", m.Label, m.Resolution)
+		}
+		if m.Label != m.Name+" ("+m.Resolution+")" {
+			t.Errorf("label %q is not name %q plus its resolution", m.Label, m.Name)
+		}
+		if _, _, err := config.ParseResolution(m.Resolution); err != nil {
+			t.Errorf("match %q has unparsable resolution: %v", m.Label, err)
+		}
+		if OrientationIndexOf(m.Resolution) != OrientationPortrait {
+			t.Errorf("match %q is not portrait; the table is expected to be", m.Label)
+		}
+	}
+}

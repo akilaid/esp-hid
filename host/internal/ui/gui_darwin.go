@@ -45,6 +45,13 @@ type darwinGUI struct {
 	permissionsOK  bool
 	autoStartDone  bool
 	secureInputWas bool
+
+	// The rows of the device suggestions list, in display order.
+	deviceMatches []DeviceMatch
+	// True while this code is writing to the device-layout controls. AppKit
+	// does not echo programmatic writes back as edits, so this is belt and
+	// braces — but it keeps the two GUIs' logic identical.
+	syncing bool
 }
 
 // gui is a singleton: the C layer holds no Go pointers, so the exported
@@ -72,6 +79,14 @@ func Run(cfg config.Config) error {
 		C.ehbGuiAddHostSide(cValue)
 		C.free(unsafe.Pointer(cValue))
 	}
+	for _, orientation := range OrientationChoices {
+		cValue := C.CString(orientation)
+		C.ehbGuiAddOrientation(cValue)
+		C.free(unsafe.Pointer(cValue))
+	}
+	cHint := C.CString(ResolutionHint)
+	C.ehbGuiSetResolutionHint(cHint)
+	C.free(unsafe.Pointer(cHint))
 
 	values := FormValuesFrom(cfg)
 	cHotkey := C.CString(values.ToggleHotkey)
@@ -80,6 +95,9 @@ func Run(cfg config.Config) error {
 		cBool(cfg.AutoSwitch), cResolution, C.int(values.HostSideIndex))
 	C.free(unsafe.Pointer(cHotkey))
 	C.free(unsafe.Pointer(cResolution))
+	if index := OrientationIndexOf(values.Resolution); index >= 0 {
+		C.ehbGuiSetOrientation(C.int(index))
+	}
 
 	go app.consumeEvents()
 
@@ -214,6 +232,76 @@ func (g *darwinGUI) setRunning(running bool) {
 	C.ehbGuiSetRunning(cBool(running))
 }
 
+// The device-layout controls feed one another: a picked device or a flipped
+// orientation writes the resolution field, and an edited resolution moves the
+// orientation popup. Same logic as the Windows build, behind the C setters.
+
+func (g *darwinGUI) deviceSearchChanged(query string) {
+	if g.syncing {
+		return
+	}
+	g.deviceMatches = DeviceMatches(query)
+	g.syncing = true
+	C.ehbGuiClearDeviceMatches()
+	for _, m := range g.deviceMatches {
+		cLabel := C.CString(m.Label)
+		cName := C.CString(m.Name)
+		C.ehbGuiAddDeviceMatch(cLabel, cName)
+		C.free(unsafe.Pointer(cLabel))
+		C.free(unsafe.Pointer(cName))
+	}
+	// Show lays the list out (or hides it when empty); the highlight then
+	// sits on the best match, which also fills the field below.
+	C.ehbGuiShowDeviceMatches()
+	if len(g.deviceMatches) > 0 {
+		C.ehbGuiSelectDeviceMatch(0)
+	}
+	g.syncing = false
+	if len(g.deviceMatches) > 0 {
+		g.setResolution(g.deviceMatches[0].Resolution)
+	}
+}
+
+func (g *darwinGUI) deviceMatchSelected(index int) {
+	if g.syncing || index < 0 || index >= len(g.deviceMatches) {
+		return
+	}
+	g.setResolution(g.deviceMatches[index].Resolution)
+}
+
+func (g *darwinGUI) orientationChanged(index int) {
+	if g.syncing {
+		return
+	}
+	form := C.ehbGuiReadForm()
+	if flipped, ok := OrientResolution(C.GoString(&form.resolution[0]), index); ok {
+		g.setResolution(flipped)
+	}
+}
+
+func (g *darwinGUI) resolutionEdited(text string) {
+	if g.syncing {
+		return
+	}
+	if index := OrientationIndexOf(text); index >= 0 {
+		g.syncing = true
+		C.ehbGuiSetOrientation(C.int(index))
+		g.syncing = false
+	}
+}
+
+// setResolution writes the field and moves the orientation popup to match.
+func (g *darwinGUI) setResolution(value string) {
+	g.syncing = true
+	cValue := C.CString(value)
+	C.ehbGuiSetResolution(cValue)
+	C.free(unsafe.Pointer(cValue))
+	if index := OrientationIndexOf(value); index >= 0 {
+		C.ehbGuiSetOrientation(C.int(index))
+	}
+	g.syncing = false
+}
+
 func (g *darwinGUI) readConfigFromForm() error {
 	form := C.ehbGuiReadForm()
 	values := FormValues{
@@ -288,6 +376,18 @@ func (g *darwinGUI) refreshPermissions() {
 
 //export goGuiStartClicked
 func goGuiStartClicked() { app.startBridge() }
+
+//export goGuiDeviceSearchChanged
+func goGuiDeviceSearchChanged(text *C.char) { app.deviceSearchChanged(C.GoString(text)) }
+
+//export goGuiDeviceMatchSelected
+func goGuiDeviceMatchSelected(index C.int) { app.deviceMatchSelected(int(index)) }
+
+//export goGuiOrientationChanged
+func goGuiOrientationChanged(index C.int) { app.orientationChanged(int(index)) }
+
+//export goGuiResolutionEdited
+func goGuiResolutionEdited(text *C.char) { app.resolutionEdited(C.GoString(text)) }
 
 //export goGuiStopClicked
 func goGuiStopClicked() {

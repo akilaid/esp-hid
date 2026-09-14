@@ -15,3 +15,6 @@ host/cmd/bridge/rsrc_windows_*.syso
 /host/dist
 *.app
 .DS_Store
+# Raw device-catalog export that host/internal/devicedb/gen reads. Only the
+# generated devices.tsv is committed.
+/devices.csv

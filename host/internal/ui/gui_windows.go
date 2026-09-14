@@ -15,6 +15,7 @@ import (
 	"github.com/lxn/walk"
 	//lint:ignore ST1001 walk's declarative DSL is designed for dot import
 	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 
 	"esp-hid/host/internal/bridge"
 	"esp-hid/host/internal/config"
@@ -46,6 +47,14 @@ type gui struct {
 	manualRadio   *walk.RadioButton
 	resCombo      *walk.ComboBox
 	sideCombo     *walk.ComboBox
+	deviceCombo   *walk.ComboBox
+	orientCombo   *walk.ComboBox
+
+	// The rows in deviceCombo's list, in display order.
+	deviceMatches []DeviceMatch
+	// True while this code is writing to the device-layout controls, so the
+	// change events they raise are not mistaken for user edits and fed back.
+	syncing bool
 
 	trayIcon   *walk.NotifyIcon
 	iconApp    *walk.Icon
@@ -89,12 +98,16 @@ func (app *gui) build() error {
 	sideIndex := IndexOf(HostSideChoices, app.cfg.HostSide)
 	resValue := fmt.Sprintf("%dx%d", app.cfg.SlaveWidth, app.cfg.SlaveHeight)
 	resIndex := IndexOf(SlaveResolutionChoices, resValue)
+	orientIndex := OrientationIndexOf(resValue)
+	if orientIndex < 0 {
+		orientIndex = OrientationPortrait
+	}
 
 	window := MainWindow{
 		AssignTo: &app.mw,
 		Title:    "ESP HID Bridge",
-		MinSize:  Size{Width: 560, Height: 380},
-		Size:     Size{Width: 580, Height: 400},
+		MinSize:  Size{Width: 560, Height: 440},
+		Size:     Size{Width: 580, Height: 460},
 		Layout:   VBox{},
 		Children: []Widget{
 			GroupBox{
@@ -148,18 +161,42 @@ func (app *gui) build() error {
 				Title:  "Device Layout",
 				Layout: Grid{Columns: 4},
 				Children: []Widget{
+					Label{Text: "Device:"},
+					ComboBox{
+						AssignTo:              &app.deviceCombo,
+						Editable:              true,
+						ColumnSpan:            3,
+						ToolTipText:           "Type part of a phone or tablet name; matches drop down and the best one fills in the resolution",
+						OnTextChanged:         app.deviceSearchChanged,
+						OnCurrentIndexChanged: app.deviceMatchSelected,
+					},
 					Label{Text: "Device resolution:"},
 					ComboBox{
-						AssignTo:     &app.resCombo,
-						Editable:     true,
-						Model:        SlaveResolutionChoices,
-						CurrentIndex: resIndex,
+						AssignTo:              &app.resCombo,
+						Editable:              true,
+						Model:                 SlaveResolutionChoices,
+						CurrentIndex:          resIndex,
+						ToolTipText:           ResolutionHint,
+						OnTextChanged:         app.resolutionEdited,
+						OnCurrentIndexChanged: app.resolutionEdited,
+					},
+					Label{Text: "Orientation:"},
+					ComboBox{
+						AssignTo:              &app.orientCombo,
+						Model:                 OrientationChoices,
+						CurrentIndex:          orientIndex,
+						OnCurrentIndexChanged: app.orientationChanged,
 					},
 					Label{Text: "This PC sits:"},
 					ComboBox{
 						AssignTo:     &app.sideCombo,
 						Model:        HostSideChoices,
 						CurrentIndex: sideIndex,
+					},
+					Label{
+						Text:       ResolutionHint,
+						ColumnSpan: 4,
+						TextColor:  walk.RGB(0x6e, 0x6e, 0x6e),
 					},
 				},
 			},
@@ -224,6 +261,96 @@ func (app *gui) setupTray() {
 	})
 	_ = trayIcon.ContextMenu().Actions().Add(exitAction)
 	_ = trayIcon.SetVisible(true)
+}
+
+// The device-layout controls feed one another: a picked device or a flipped
+// orientation writes the resolution field, and an edited resolution moves the
+// orientation picker. Every write from here goes through setResolution or is
+// wrapped in syncing so it does not come back round as a user edit.
+
+// deviceSearchChanged runs on every keystroke in the device box: the list is
+// refilled with the matches and dropped open under the text. Replacing the
+// list (CB_RESETCONTENT) also wipes the edit box, so the typed text and the
+// caret are put back before anything is shown. No row is selected here —
+// CB_SETCURSEL would copy the row's text over what is being typed — the
+// user reaches the rows with Down or the mouse.
+func (app *gui) deviceSearchChanged() {
+	if app.syncing {
+		return
+	}
+	text := app.deviceCombo.Text()
+	start, end := app.deviceCombo.TextSelection()
+	app.deviceMatches = DeviceMatches(text)
+	labels := make([]string, len(app.deviceMatches))
+	for i, m := range app.deviceMatches {
+		labels[i] = m.Label
+	}
+	app.syncing = true
+	_ = app.deviceCombo.SetModel(labels)
+	_ = app.deviceCombo.SetText(text)
+	app.deviceCombo.SetTextSelection(start, end)
+	show := uintptr(0)
+	if len(labels) > 0 {
+		show = 1
+	}
+	app.deviceCombo.SendMessage(win.CB_SHOWDROPDOWN, show, 0)
+	app.syncing = false
+	// The best match fills the field as the user types, so the picker never
+	// shows a device whose size is not the one about to be saved.
+	if len(app.deviceMatches) > 0 {
+		app.setResolution(app.deviceMatches[0].Resolution)
+	}
+}
+
+func (app *gui) deviceMatchSelected() {
+	if app.syncing {
+		return
+	}
+	i := app.deviceCombo.CurrentIndex()
+	if i < 0 || i >= len(app.deviceMatches) {
+		return
+	}
+	app.setResolution(app.deviceMatches[i].Resolution)
+}
+
+func (app *gui) orientationChanged() {
+	if app.syncing {
+		return
+	}
+	if flipped, ok := OrientResolution(app.resolutionText(), app.orientCombo.CurrentIndex()); ok {
+		app.setResolution(flipped)
+	}
+}
+
+func (app *gui) resolutionEdited() {
+	if app.syncing {
+		return
+	}
+	if index := OrientationIndexOf(app.resolutionText()); index >= 0 {
+		app.syncing = true
+		_ = app.orientCombo.SetCurrentIndex(index)
+		app.syncing = false
+	}
+}
+
+// resolutionText is the field's value as of the current event. When a preset
+// was just picked from the list the edit box may not have been updated yet,
+// so the list item is authoritative; typed text has no list index.
+func (app *gui) resolutionText() string {
+	if i := app.resCombo.CurrentIndex(); i >= 0 && i < len(SlaveResolutionChoices) {
+		return SlaveResolutionChoices[i]
+	}
+	return app.resCombo.Text()
+}
+
+// setResolution writes the field and moves the orientation picker to match.
+func (app *gui) setResolution(value string) {
+	app.syncing = true
+	_ = app.resCombo.SetText(value)
+	if index := OrientationIndexOf(value); index >= 0 {
+		_ = app.orientCombo.SetCurrentIndex(index)
+	}
+	app.syncing = false
 }
 
 func (app *gui) readConfigFromForm() error {
@@ -305,6 +432,8 @@ func (app *gui) setRunning(running bool) {
 	app.manualRadio.SetEnabled(!running)
 	app.resCombo.SetEnabled(!running)
 	app.sideCombo.SetEnabled(!running)
+	app.deviceCombo.SetEnabled(!running)
+	app.orientCombo.SetEnabled(!running)
 }
 
 func (app *gui) consumeEvents() {

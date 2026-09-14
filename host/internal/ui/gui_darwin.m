@@ -12,16 +12,39 @@ extern void goGuiOpenSettingsClicked(void);
 extern void goGuiTick(void);
 extern void goGuiWillTerminate(void);
 extern void goGuiPerform(uintptr_t token);
+// Device-layout edits. Signatures match what cgo exports for *C.char / C.int.
+extern void goGuiDeviceSearchChanged(char *text);
+extern void goGuiDeviceMatchSelected(int index);
+extern void goGuiOrientationChanged(int index);
+extern void goGuiResolutionEdited(char *text);
 
 // Fixed-size window: the layout is hand-placed, which is a fair trade for a
 // settings form that never needs to resize and keeps this file free of
 // constraint plumbing.
 static const CGFloat kWindowWidth = 620;
-static const CGFloat kWindowHeight = 560;
+static const CGFloat kWindowHeight = 635;
 static const CGFloat kMargin = 20;
 static const CGFloat kRowHeight = 22;
 
-@interface EHBController : NSObject <NSApplicationDelegate, NSWindowDelegate>
+@interface EHBController
+    : NSObject <NSApplicationDelegate, NSWindowDelegate, NSComboBoxDelegate,
+                NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate>
+@end
+
+// The list under the Device field, in the style of the search in System
+// Settings: a borderless child window that never becomes key, so the field
+// keeps the focus and the keyboard while the list is up. Up/Down move the
+// highlight, Return or a click picks, Escape puts it away.
+@interface EHBSuggestionTable : NSTableView
+@end
+
+@implementation EHBSuggestionTable
+// The window is never key, and a click into a non-key window would otherwise
+// only activate it; this lets the first click land on a row.
+- (BOOL)acceptsFirstMouse:(NSEvent *)event {
+  (void)event;
+  return YES;
+}
 @end
 
 static EHBController *gController = nil;
@@ -50,6 +73,18 @@ static NSButton *gKeyboardCheck = nil;
 static NSSegmentedControl *gModeControl = nil;
 static NSComboBox *gResolutionCombo = nil;
 static NSPopUpButton *gHostSidePopup = nil;
+static NSSearchField *gDeviceSearch = nil;
+static NSPopUpButton *gOrientationPopup = nil;
+
+static NSWindow *gSuggestions = nil;
+static NSScrollView *gSuggestionScroll = nil;
+static EHBSuggestionTable *gSuggestionTable = nil;
+static NSMutableArray<NSString *> *gSuggestionLabels = nil;
+static NSMutableArray<NSString *> *gSuggestionNames = nil;
+static const CGFloat kSuggestionRowHeight = 24;
+static const CGFloat kSuggestionPad = 5;
+static const NSUInteger kSuggestionRowsShown = 8;
+static NSTextField *gResolutionHint = nil;
 
 static NSTextField *makeLabel(NSView *parent, NSString *text, CGFloat x,
                               CGFloat y, CGFloat width, BOOL bold) {
@@ -106,6 +141,63 @@ static NSBox *makeBox(NSView *parent, NSString *title, CGFloat y,
   return box;
 }
 
+static void hideSuggestions(void) {
+  if ([gSuggestions parentWindow]) {
+    [gWindow removeChildWindow:gSuggestions];
+  }
+  [gSuggestions orderOut:nil];
+}
+
+static void showSuggestions(void) {
+  NSUInteger count = [gSuggestionLabels count];
+  if (count == 0 || ![gWindow isVisible]) {
+    hideSuggestions();
+    return;
+  }
+  NSRect field = [gDeviceSearch convertRect:[gDeviceSearch bounds] toView:nil];
+  NSRect anchor = [gWindow convertRectToScreen:field];
+  CGFloat rows = (CGFloat)MIN(count, kSuggestionRowsShown);
+  CGFloat height = rows * kSuggestionRowHeight + 2 * kSuggestionPad;
+  NSRect frame = NSMakeRect(NSMinX(anchor), NSMinY(anchor) - height - 4,
+                            NSWidth(anchor), height);
+  [gSuggestions setFrame:frame display:NO];
+
+  // Laid out by hand on every show rather than left to autoresizing: the
+  // panel goes from a handful of rows to one and back, and a stale frame or
+  // scroll offset from the previous size is exactly what clips a lone row.
+  NSRect inner = NSInsetRect([[gSuggestions contentView] bounds], 0, kSuggestionPad);
+  [gSuggestionScroll setFrame:inner];
+  [gSuggestionTable reloadData];
+  [gSuggestionTable setFrameSize:NSMakeSize(NSWidth(inner), rows * kSuggestionRowHeight)];
+  [gSuggestionTable sizeLastColumnToFit];
+  [[gSuggestionScroll contentView] scrollToPoint:NSZeroPoint];
+  [gSuggestionScroll reflectScrolledClipView:[gSuggestionScroll contentView]];
+
+  if ([gSuggestions parentWindow] == nil) {
+    [gWindow addChildWindow:gSuggestions ordered:NSWindowAbove];
+  }
+  [gSuggestions orderFront:nil];
+}
+
+static void selectSuggestion(NSInteger row) {
+  if (row < 0 || row >= (NSInteger)[gSuggestionLabels count]) {
+    return;
+  }
+  [gSuggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
+                byExtendingSelection:NO];
+  [gSuggestionTable scrollRowToVisible:row];
+}
+
+// Return or a click: commit the row, leave its name in the field, put the
+// list away. The highlight already filled the resolution as it moved.
+static void acceptSuggestion(NSInteger row) {
+  if (row >= 0 && row < (NSInteger)[gSuggestionNames count]) {
+    goGuiDeviceMatchSelected((int)row);
+    [gDeviceSearch setStringValue:gSuggestionNames[(NSUInteger)row]];
+  }
+  hideSuggestions();
+}
+
 @implementation EHBController
 
 - (void)startClicked:(id)sender {
@@ -144,6 +236,144 @@ static NSBox *makeBox(NSView *parent, NSString *title, CGFloat y,
   [NSApp activateIgnoringOtherApps:YES];
 }
 
+// The search field's action fires on Return and on its clear button, not per
+// keystroke (typing goes through controlTextDidChange:). Only the cleared
+// case needs handling — it is the one edit the delegate does not see — and
+// Return must not re-run the search, or it would undo a pick made from the
+// popup.
+- (void)deviceSearchAction:(id)sender {
+  (void)sender;
+  if ([[gDeviceSearch stringValue] length] == 0) {
+    goGuiDeviceSearchChanged((char *)"");
+  }
+}
+
+- (void)suggestionClicked:(id)sender {
+  (void)sender;
+  acceptSuggestion([gSuggestionTable clickedRow]);
+}
+
+// Moving the highlight fills the resolution, so what the field shows below
+// is always the row that is lit.
+- (void)tableViewSelectionDidChange:(NSNotification *)note {
+  (void)note;
+  NSInteger row = [gSuggestionTable selectedRow];
+  if (row >= 0) {
+    goGuiDeviceMatchSelected((int)row);
+  }
+}
+
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)table {
+  (void)table;
+  return (NSInteger)[gSuggestionLabels count];
+}
+
+- (NSView *)tableView:(NSTableView *)table
+    viewForTableColumn:(NSTableColumn *)column
+                   row:(NSInteger)row {
+  (void)column;
+  NSTableCellView *cell = [table makeViewWithIdentifier:@"label" owner:nil];
+  if (cell == nil) {
+    cell = [[NSTableCellView alloc]
+        initWithFrame:NSMakeRect(0, 0, 200, kSuggestionRowHeight)];
+    [cell setIdentifier:@"label"];
+    NSTextField *text = [[NSTextField alloc] initWithFrame:NSMakeRect(8, 3, 184, 18)];
+    [text setAutoresizingMask:NSViewWidthSizable];
+    [text setBezeled:NO];
+    [text setDrawsBackground:NO];
+    [text setEditable:NO];
+    [text setSelectable:NO];
+    [text setLineBreakMode:NSLineBreakByTruncatingTail];
+    [text setFont:[NSFont systemFontOfSize:13]];
+    [cell addSubview:text];
+    // Registered as the cell's text field so the highlight recolours it.
+    [cell setTextField:text];
+  }
+  [[cell textField] setStringValue:gSuggestionLabels[(NSUInteger)row]];
+  return cell;
+}
+
+// Keyboard for the list while the search field keeps focus. Anything not
+// handled here falls through to the field's own behaviour — including
+// Escape when the list is already down, which clears the search.
+- (BOOL)control:(NSControl *)control
+               textView:(NSTextView *)textView
+    doCommandBySelector:(SEL)command {
+  (void)textView;
+  if (control != gDeviceSearch) {
+    return NO;
+  }
+  BOOL shown = [gSuggestions isVisible];
+  NSInteger rows = (NSInteger)[gSuggestionLabels count];
+  if (command == @selector(moveDown:)) {
+    if (!shown) {
+      showSuggestions();
+      selectSuggestion(0);
+    } else {
+      selectSuggestion(MIN([gSuggestionTable selectedRow] + 1, rows - 1));
+    }
+    return YES;
+  }
+  if (command == @selector(moveUp:) && shown) {
+    selectSuggestion(MAX([gSuggestionTable selectedRow] - 1, 0));
+    return YES;
+  }
+  if (command == @selector(insertNewline:) && shown) {
+    acceptSuggestion([gSuggestionTable selectedRow]);
+    return YES;
+  }
+  if (command == @selector(cancelOperation:) && shown) {
+    hideSuggestions();
+    return YES;
+  }
+  return NO;
+}
+
+// Focus leaving the field takes the list with it. A click on a row does not
+// count: the list's window is never key, so the field stays first responder.
+- (void)controlTextDidEndEditing:(NSNotification *)note {
+  if ([note object] == gDeviceSearch) {
+    hideSuggestions();
+  }
+}
+
+- (void)windowDidResignKey:(NSNotification *)note {
+  if ([note object] == gWindow) {
+    hideSuggestions();
+  }
+}
+
+- (void)orientationChanged:(id)sender {
+  (void)sender;
+  goGuiOrientationChanged((int)[gOrientationPopup indexOfSelectedItem]);
+}
+
+// Typing, in either the device search or the resolution field. Only user
+// edits arrive here — setStringValue: from the ehbGui* setters does not —
+// so nothing written by Go comes back round as an edit.
+- (void)controlTextDidChange:(NSNotification *)note {
+  id object = [note object];
+  if (object == gDeviceSearch) {
+    goGuiDeviceSearchChanged((char *)[[gDeviceSearch stringValue] UTF8String]);
+  } else if (object == gResolutionCombo) {
+    goGuiResolutionEdited((char *)[[gResolutionCombo stringValue] UTF8String]);
+  }
+}
+
+// A preset picked from the resolution combo's list. stringValue still holds
+// the previous text at this point, so read the chosen item instead.
+- (void)comboBoxSelectionDidChange:(NSNotification *)note {
+  if ([note object] != gResolutionCombo) {
+    return;
+  }
+  NSInteger index = [gResolutionCombo indexOfSelectedItem];
+  if (index < 0) {
+    return;
+  }
+  NSString *value = [gResolutionCombo itemObjectValueAtIndex:index];
+  goGuiResolutionEdited((char *)[value UTF8String]);
+}
+
 - (void)tick:(NSTimer *)timer {
   (void)timer;
   goGuiTick();
@@ -152,6 +382,7 @@ static NSBox *makeBox(NSView *parent, NSString *title, CGFloat y,
 // Closing the window hides it, matching the Windows build where the X button
 // minimises to the tray. Quitting is done from the menu bar.
 - (BOOL)windowShouldClose:(NSWindow *)sender {
+  hideSuggestions();
   [sender orderOut:nil];
   return NO;
 }
@@ -195,7 +426,7 @@ static void buildMenuBar(void) {
   [appItem setSubmenu:appMenu];
 
   // A minimal Edit menu so the standard clipboard shortcuts work in the
-  // hotkey and resolution fields.
+  // hotkey, device search and resolution fields.
   NSMenuItem *editItem = [[NSMenuItem alloc] init];
   [menuBar addItem:editItem];
   NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
@@ -267,6 +498,66 @@ static void buildStatusItem(void) {
   [gStatusItem setMenu:menu];
 }
 
+static void buildSuggestions(void) {
+  gSuggestionLabels = [NSMutableArray array];
+  gSuggestionNames = [NSMutableArray array];
+
+  gSuggestions = [[NSWindow alloc]
+      initWithContentRect:NSMakeRect(0, 0, 300, 100)
+                styleMask:NSWindowStyleMaskBorderless
+                  backing:NSBackingStoreBuffered
+                    defer:NO];
+  [gSuggestions setOpaque:NO];
+  [gSuggestions setBackgroundColor:[NSColor clearColor]];
+  [gSuggestions setHasShadow:YES];
+  [gSuggestions setReleasedWhenClosed:NO];
+
+  // The menu material gives the same translucent, rounded panel the
+  // system's own completion lists use, in both appearances.
+  NSVisualEffectView *backdrop = [[NSVisualEffectView alloc]
+      initWithFrame:[[gSuggestions contentView] bounds]];
+  [backdrop setMaterial:NSVisualEffectMaterialMenu];
+  [backdrop setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
+  [backdrop setState:NSVisualEffectStateActive];
+  [backdrop setWantsLayer:YES];
+  [[backdrop layer] setCornerRadius:8];
+  [[backdrop layer] setMasksToBounds:YES];
+  [gSuggestions setContentView:backdrop];
+
+  // Frames are set on every show (see showSuggestions), so nothing here
+  // autoresizes and the scroll view is told not to invent insets of its own.
+  NSScrollView *scroll = [[NSScrollView alloc]
+      initWithFrame:NSInsetRect([backdrop bounds], 0, kSuggestionPad)];
+  [scroll setBorderType:NSNoBorder];
+  [scroll setDrawsBackground:NO];
+  [scroll setHasVerticalScroller:YES];
+  [scroll setAutohidesScrollers:YES];
+  [scroll setAutomaticallyAdjustsContentInsets:NO];
+  [scroll setContentInsets:NSEdgeInsetsMake(0, 0, 0, 0)];
+  gSuggestionScroll = scroll;
+
+  gSuggestionTable = [[EHBSuggestionTable alloc]
+      initWithFrame:[[scroll contentView] bounds]];
+  // Plain, not the macOS 11 inset style, whose rounded padded rows assume a
+  // sidebar-sized table and would leave a lone row swimming in margin.
+  [gSuggestionTable setStyle:NSTableViewStylePlain];
+  NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"label"];
+  [column setResizingMask:NSTableColumnAutoresizingMask];
+  [gSuggestionTable addTableColumn:column];
+  [gSuggestionTable setHeaderView:nil];
+  [gSuggestionTable setRowHeight:kSuggestionRowHeight];
+  [gSuggestionTable setIntercellSpacing:NSMakeSize(0, 0)];
+  [gSuggestionTable
+      setColumnAutoresizingStyle:NSTableViewLastColumnOnlyAutoresizingStyle];
+  [gSuggestionTable setBackgroundColor:[NSColor clearColor]];
+  [gSuggestionTable setDataSource:gController];
+  [gSuggestionTable setDelegate:gController];
+  [gSuggestionTable setTarget:gController];
+  [gSuggestionTable setAction:@selector(suggestionClicked:)];
+  [scroll setDocumentView:gSuggestionTable];
+  [backdrop addSubview:scroll];
+}
+
 static void buildWindow(void) {
   NSRect frame = NSMakeRect(0, 0, kWindowWidth, kWindowHeight);
   gWindow = [[NSWindow alloc]
@@ -282,7 +573,7 @@ static void buildWindow(void) {
   NSView *root = [gWindow contentView];
 
   // --- Connection & Status -----------------------------------------------
-  NSBox *statusBox = makeBox(root, @"Connection & Status", 275, 265);
+  NSBox *statusBox = makeBox(root, @"Connection & Status", 350, 265);
   NSView *sv = [statusBox contentView];
   CGFloat sw = NSWidth([sv bounds]);
 
@@ -320,7 +611,7 @@ static void buildWindow(void) {
   [gStopButton setEnabled:NO];
 
   // --- Input Settings -----------------------------------------------------
-  NSBox *inputBox = makeBox(root, @"Input Settings", 135, 130);
+  NSBox *inputBox = makeBox(root, @"Input Settings", 210, 130);
   NSView *iv = [inputBox contentView];
   CGFloat iw = NSWidth([iv bounds]);
 
@@ -353,20 +644,47 @@ static void buildWindow(void) {
   [iv addSubview:gModeControl];
 
   // --- Device Layout ------------------------------------------------------
-  NSBox *layoutBox = makeBox(root, @"Device Layout", 20, 95);
+  NSBox *layoutBox = makeBox(root, @"Device Layout", 20, 170);
   NSView *lv = [layoutBox contentView];
   CGFloat lw = NSWidth([lv bounds]);
 
-  makeLabel(lv, @"Device resolution:", 0, 32, 130, NO);
+  // Row 1: find the device by name. Matches drop down under the field as
+  // the user types, and the best one fills the resolution straight away.
+  makeLabel(lv, @"Device:", 0, 110, 130, NO);
+  gDeviceSearch = [[NSSearchField alloc]
+      initWithFrame:NSMakeRect(135, 108, lw - 135, 24)];
+  [gDeviceSearch setPlaceholderString:@"Phone or tablet name"];
+  [gDeviceSearch setDelegate:gController];
+  [gDeviceSearch setTarget:gController];
+  [gDeviceSearch setAction:@selector(deviceSearchAction:)];
+  [lv addSubview:gDeviceSearch];
+
+  // Row 2: the resolution itself — what is actually saved — and its
+  // orientation, which is just the same two numbers the other way round.
+  makeLabel(lv, @"Device resolution:", 0, 76, 130, NO);
   gResolutionCombo = [[NSComboBox alloc]
-      initWithFrame:NSMakeRect(135, 30, 150, 24)];
+      initWithFrame:NSMakeRect(135, 74, 150, 24)];
   [gResolutionCombo setEditable:YES];
+  [gResolutionCombo setDelegate:gController];
   [lv addSubview:gResolutionCombo];
 
-  makeLabel(lv, @"This Mac sits:", lw - 250, 32, 110, NO);
+  makeLabel(lv, @"Orientation:", lw - 250, 76, 110, NO);
+  gOrientationPopup = [[NSPopUpButton alloc]
+      initWithFrame:NSMakeRect(lw - 135, 74, 135, 25)];
+  [gOrientationPopup setTarget:gController];
+  [gOrientationPopup setAction:@selector(orientationChanged:)];
+  [lv addSubview:gOrientationPopup];
+
+  // Row 3.
+  makeLabel(lv, @"This Mac sits:", 0, 42, 130, NO);
   gHostSidePopup = [[NSPopUpButton alloc]
-      initWithFrame:NSMakeRect(lw - 135, 30, 135, 25)];
+      initWithFrame:NSMakeRect(135, 40, 150, 25)];
   [lv addSubview:gHostSidePopup];
+
+  // Text comes from Go (ui.ResolutionHint) so both GUIs say the same thing.
+  gResolutionHint = makeLabel(lv, @"", 0, 8, lw, NO);
+  [gResolutionHint setFont:[NSFont systemFontOfSize:11]];
+  [gResolutionHint setTextColor:[NSColor secondaryLabelColor]];
 }
 
 void ehbGuiInit(void) {
@@ -381,6 +699,7 @@ void ehbGuiInit(void) {
 
   buildMenuBar();
   buildWindow();
+  buildSuggestions();
   buildStatusItem();
 
   [NSTimer scheduledTimerWithTimeInterval:1.0
@@ -404,6 +723,40 @@ void ehbGuiAddResolution(const char *value) {
 
 void ehbGuiAddHostSide(const char *value) {
   [gHostSidePopup addItemWithTitle:[NSString stringWithUTF8String:value]];
+}
+
+void ehbGuiAddOrientation(const char *value) {
+  [gOrientationPopup addItemWithTitle:[NSString stringWithUTF8String:value]];
+}
+
+void ehbGuiClearDeviceMatches(void) {
+  [gSuggestionLabels removeAllObjects];
+  [gSuggestionNames removeAllObjects];
+}
+
+void ehbGuiAddDeviceMatch(const char *label, const char *name) {
+  [gSuggestionLabels addObject:[NSString stringWithUTF8String:label]];
+  [gSuggestionNames addObject:[NSString stringWithUTF8String:name]];
+}
+
+void ehbGuiShowDeviceMatches(void) { showSuggestions(); }
+
+void ehbGuiSelectDeviceMatch(int index) { selectSuggestion(index); }
+
+void ehbGuiSetResolution(const char *value) {
+  [gResolutionCombo setStringValue:[NSString stringWithUTF8String:value]];
+}
+
+void ehbGuiSetResolutionHint(const char *text) {
+  NSString *value = [NSString stringWithUTF8String:text];
+  [gResolutionHint setStringValue:value];
+  [gResolutionCombo setToolTip:value];
+}
+
+void ehbGuiSetOrientation(int index) {
+  if (index >= 0 && index < [gOrientationPopup numberOfItems]) {
+    [gOrientationPopup selectItemAtIndex:index];
+  }
 }
 
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
@@ -460,6 +813,11 @@ void ehbGuiSetRunning(int running) {
   [gModeControl setEnabled:running ? NO : YES];
   [gResolutionCombo setEnabled:running ? NO : YES];
   [gHostSidePopup setEnabled:running ? NO : YES];
+  [gDeviceSearch setEnabled:running ? NO : YES];
+  [gOrientationPopup setEnabled:running ? NO : YES];
+  if (running) {
+    hideSuggestions();
+  }
   // Forgetting the bound board mid-session would leave the running link
   // pointing at a device the settings no longer name.
   [gForgetButton setEnabled:running ? NO : YES];
