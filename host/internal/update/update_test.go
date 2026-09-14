@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -88,7 +87,9 @@ func TestParseSums(t *testing.T) {
 }
 
 // fakeRelease serves a releases/latest document plus its assets, so Check
-// and Download run end to end without the network.
+// and Download run end to end without the network. The darwin package is
+// the one downloaded; the tests name the platform explicitly so they run
+// the same on every CI machine.
 type fakeRelease struct {
 	srv     *httptest.Server
 	tag     string
@@ -100,12 +101,7 @@ type fakeRelease struct {
 func newFakeRelease(t *testing.T, tag string, withSums bool) *fakeRelease {
 	t.Helper()
 	fr := &fakeRelease{tag: tag, payload: []byte("pretend this is a program")}
-	switch runtime.GOOS {
-	case "darwin":
-		fr.pkgName = "ESP-HID-Bridge-" + tag + "-macos.zip"
-	default:
-		fr.pkgName = "esp-hid-bridge.exe"
-	}
+	fr.pkgName = "ESP-HID-Bridge-" + tag + "-macos.zip"
 	sum := sha256.Sum256(fr.payload)
 	fr.sums = hex.EncodeToString(sum[:]) + "  " + fr.pkgName + "\n"
 
@@ -114,7 +110,9 @@ func newFakeRelease(t *testing.T, tag string, withSums bool) *fakeRelease {
 		if r.Header.Get("User-Agent") == "" {
 			t.Error("request had no User-Agent; GitHub rejects those")
 		}
-		assets := `{"name":"` + fr.pkgName + `","browser_download_url":"` + fr.srv.URL + `/pkg","size":25}`
+		assets := `{"name":"` + fr.pkgName + `","browser_download_url":"` + fr.srv.URL + `/pkg","size":25}` +
+			`,{"name":"esp-hid-bridge.exe","browser_download_url":"` + fr.srv.URL + `/pkg","size":25}` +
+			`,{"name":"firmware-esp32c3.zip","browser_download_url":"` + fr.srv.URL + `/pkg","size":25}`
 		if withSums {
 			assets += `,{"name":"SHA256SUMS","browser_download_url":"` + fr.srv.URL + `/sums","size":90}`
 		}
@@ -130,7 +128,7 @@ func newFakeRelease(t *testing.T, tag string, withSums bool) *fakeRelease {
 
 func TestCheckFindsNewerRelease(t *testing.T) {
 	fr := newFakeRelease(t, "v2.3.0", true)
-	rel, err := Check(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0")
+	rel, err := checkFor(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0", "darwin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,12 +138,23 @@ func TestCheckFindsNewerRelease(t *testing.T) {
 	if rel.URL != "https://example.invalid/rel" {
 		t.Errorf("URL = %q", rel.URL)
 	}
+	win, err := checkFor(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0", "windows")
+	if err != nil || win.Package.Name != "esp-hid-bridge.exe" {
+		t.Fatalf("windows: %+v, %v", win, err)
+	}
+}
+
+func TestCheckNewerButNoPackageForPlatform(t *testing.T) {
+	fr := newFakeRelease(t, "v2.3.0", true)
+	if _, err := checkFor(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0", "linux"); err == nil {
+		t.Fatal("a release with no package for the platform was offered")
+	}
 }
 
 func TestCheckUpToDateAndOlder(t *testing.T) {
 	fr := newFakeRelease(t, "v2.3.0", true)
 	for _, current := range []string{"v2.3.0", "v2.4.0", "v3.0.0"} {
-		rel, err := Check(context.Background(), fr.srv.Client(), fr.srv.URL, current)
+		rel, err := checkFor(context.Background(), fr.srv.Client(), fr.srv.URL, current, "darwin")
 		if err != nil || rel != nil {
 			t.Errorf("current %s: got %+v, %v; want nil, nil", current, rel, err)
 		}
@@ -162,11 +171,8 @@ func TestCheckRefusesDevBuild(t *testing.T) {
 }
 
 func TestDownloadVerifiesChecksum(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		t.Skip("no package is defined for this platform")
-	}
 	fr := newFakeRelease(t, "v2.3.0", true)
-	rel, err := Check(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0")
+	rel, err := checkFor(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0", "darwin")
 	if err != nil || rel == nil {
 		t.Fatalf("check: %+v, %v", rel, err)
 	}
@@ -193,11 +199,8 @@ func TestDownloadVerifiesChecksum(t *testing.T) {
 }
 
 func TestDownloadWithoutSumsStillWorks(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		t.Skip("no package is defined for this platform")
-	}
 	fr := newFakeRelease(t, "v2.3.0", false)
-	rel, err := Check(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0")
+	rel, err := checkFor(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0", "darwin")
 	if err != nil || rel == nil || rel.Sums != nil {
 		t.Fatalf("check: %+v, %v", rel, err)
 	}

@@ -77,6 +77,12 @@ type release struct {
 // current, or nil when current is up to date. current is the build's version
 // string ("v2.3.0"; "dev" and anything else unparsable yields ErrDevBuild).
 func Check(ctx context.Context, client *http.Client, apiBase, current string) (*Release, error) {
+	return checkFor(ctx, client, apiBase, current, runtime.GOOS)
+}
+
+// checkFor is Check with the platform spelled out, so the logic is tested on
+// every CI platform and not only where a package exists.
+func checkFor(ctx context.Context, client *http.Client, apiBase, current, goos string) (*Release, error) {
 	have, ok := parseVersion(current)
 	if !ok {
 		return nil, ErrDevBuild
@@ -107,9 +113,9 @@ func Check(ctx context.Context, client *http.Client, apiBase, current string) (*
 	if !newer(want, have) {
 		return nil, nil
 	}
-	pkg, ok := packageFor(runtime.GOOS, latest.Assets)
+	pkg, ok := packageFor(goos, latest.Assets)
 	if !ok {
-		return nil, fmt.Errorf("%s has no package for %s", latest.TagName, runtime.GOOS)
+		return nil, fmt.Errorf("%s has no package for %s", latest.TagName, goos)
 	}
 	rel := &Release{Version: latest.TagName, URL: latest.HTMLURL, Package: pkg}
 	for i := range latest.Assets {
