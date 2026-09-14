@@ -120,7 +120,14 @@ hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$FINAL_DMG" >/
 rm -f "$RW_DMG"
 rm -rf "$STAGING"
 
-codesign --force --sign - "$FINAL_DMG"
+# Same identity as the app when one is available; the image's own signature
+# has no bearing on the grants, this just keeps the two consistent.
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+if [ -z "$SIGNING_IDENTITY" ]; then
+  SIGNING_IDENTITY="$(security find-identity -p codesigning 2>/dev/null |
+    sed -n 's/.*"\(ESP HID Bridge[^"]*\)".*/\1/p' | head -n1 || true)"
+fi
+codesign --force --sign "${SIGNING_IDENTITY:--}" --timestamp=none "$FINAL_DMG"
 codesign --verify --strict "$FINAL_DMG"
 
 echo

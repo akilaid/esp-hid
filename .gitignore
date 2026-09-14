@@ -18,3 +18,13 @@ host/cmd/bridge/rsrc_windows_*.syso
 # Raw device-catalog export that host/internal/devicedb/gen reads. Only the
 # generated devices.tsv is committed.
 /devices.csv
+# Code-signing material. The certificate lives in the keychain and in CI
+# secrets (host/packaging/macos/make-signing-cert.sh); it must never land
+# in this public repository in any form.
+*.p12
+*.pfx
+*.cer
+*.pem
+*.key
+*.keychain
+*.keychain-db

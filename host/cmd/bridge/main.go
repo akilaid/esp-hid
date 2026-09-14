@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"esp-hid/host/internal/config"
+	"esp-hid/host/internal/update"
 )
 
 // version is stamped by the build via -ldflags "-X main.version=...".
@@ -25,6 +26,9 @@ func main() {
 	}
 
 	log.Printf("esp-hid-bridge %s", version)
+	// Whatever the last self-update left behind (the previous bundle on
+	// macOS, the renamed exe on Windows) goes now that it has clearly worked.
+	update.Cleanup()
 	if err := run(cfg); err != nil {
 		log.Print(err)
 		reportFatal(err)

@@ -7,11 +7,21 @@
 # Prerequisites: Go 1.22+ and the Xcode Command Line Tools (cgo needs clang
 # and the macOS SDK). Output lands in dist/.
 #
-# The bundle is ad-hoc signed. That is enough for macOS to run it locally,
-# but it is not notarized, so a copy downloaded through a browser carries the
-# quarantine attribute and Gatekeeper will refuse it until the user either
+# Signing. macOS ties the Accessibility and Input Monitoring grants to the
+# app's code signature, so a signature that changes with every build — which
+# is what ad-hoc signing does — costs the user both grants on every update.
+# A stable identity fixes that, and a self-signed code-signing certificate is
+# enough: the identity is found by name in the keychain (SIGNING_IDENTITY, or
+# any "ESP HID Bridge…" certificate), and the release workflow imports the
+# same certificate from a secret so releases and local builds match. Without
+# one the bundle is ad-hoc signed and the script says so.
+#
+# Nothing here is notarized, so a copy downloaded through a browser carries
+# the quarantine attribute and Gatekeeper refuses it until the user either
 # right-clicks -> Open once, or runs:
 #   xattr -dr com.apple.quarantine "/Applications/ESP HID Bridge.app"
+# The app's own updater downloads without that attribute, so this is a
+# first-install matter only.
 
 set -euo pipefail
 
@@ -114,19 +124,42 @@ else
   echo "  note: off.png/on.png missing; using the SF Symbol fallback"
 fi
 
-echo "  signing (ad-hoc)"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+if [ -z "$SIGNING_IDENTITY" ]; then
+  SIGNING_IDENTITY="$(security find-identity -p codesigning 2>/dev/null |
+    sed -n 's/.*"\(ESP HID Bridge[^"]*\)".*/\1/p' | head -n1 || true)"
+fi
+if [ -n "$SIGNING_IDENTITY" ]; then
+  echo "  signing as \"$SIGNING_IDENTITY\""
+  SIGN=(--sign "$SIGNING_IDENTITY" --timestamp=none)
+else
+  echo "  signing (ad-hoc): no \"ESP HID Bridge\" certificate in the keychain"
+  SIGN=(--sign -)
+fi
 # Deliberately no --options runtime: the hardened runtime buys nothing
 # without notarization and only adds Gatekeeper friction.
-codesign --force --sign - "$APP_DIR/Contents/MacOS/$EXECUTABLE"
-codesign --force --sign - "$APP_DIR"
+codesign --force "${SIGN[@]}" "$APP_DIR/Contents/MacOS/$EXECUTABLE"
+codesign --force "${SIGN[@]}" "$APP_DIR"
 codesign --verify --strict --verbose=2 "$APP_DIR"
+
+# The package the app's updater installs: ditto keeps the permission bits and
+# the signature intact, which a plain zip does not promise.
+ZIP_PATH="$DIST_DIR/ESP-HID-Bridge-${VERSION}-macos.zip"
+rm -f "$ZIP_PATH"
+ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
 
 echo
 echo "Built: $SCRIPT_DIR/$APP_DIR"
+echo "Update package: $SCRIPT_DIR/$ZIP_PATH"
 echo "Run it with: open \"$APP_DIR\""
 echo
 echo "On first launch macOS will ask for Accessibility and Input Monitoring."
-echo "Because the signature is ad-hoc it changes on every rebuild, so those"
-echo "grants must be renewed after each new build. To reset a confused state:"
-echo "  tccutil reset Accessibility $BUNDLE_ID"
-echo "  tccutil reset ListenEvent $BUNDLE_ID"
+if [ -n "$SIGNING_IDENTITY" ]; then
+  echo "The signature is stable, so those grants carry over to later builds"
+  echo "signed with the same certificate."
+else
+  echo "Because the signature is ad-hoc it changes on every rebuild, so those"
+  echo "grants must be renewed after each new build. To reset a confused state:"
+  echo "  tccutil reset Accessibility $BUNDLE_ID"
+  echo "  tccutil reset ListenEvent $BUNDLE_ID"
+fi

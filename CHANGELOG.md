@@ -8,6 +8,29 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.3.0] — 2026-09-14
+
+### Added
+
+- The app checks GitHub Releases for a newer version at launch and daily,
+  and offers **Install and relaunch** in the window. The download is verified
+  against the release's `SHA256SUMS`, swapped in for the running program, and
+  the app relaunches — no browser download, no quarantine step. **Check for
+  Updates…** and **Check for Updates Automatically** in the app menu (Help
+  menu on Windows); `-check-updates=false` turns the scheduled check off.
+- macOS release builds are signed with one stable certificate, so the
+  Accessibility and Input Monitoring grants carry over between versions
+  instead of being lost on every update. `packaging/macos/make-signing-cert.sh`
+  sets it up; the workflow imports it from a secret and falls back to ad-hoc
+  with a warning when the secret is missing.
+- Releases carry `ESP-HID-Bridge-<version>-macos.zip` (the updater's
+  package) and `SHA256SUMS`.
+
+### Changed
+
+- On macOS the permission banner's strip collapses, and the window shrinks
+  with it, once both permissions are granted; it comes back if one is lost.
+
 ## [2.2.0] — 2026-09-14
 
 ### Added
@@ -171,6 +194,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.3.0]: https://github.com/akilaid/esp-hid/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/akilaid/esp-hid/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/akilaid/esp-hid/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/akilaid/esp-hid/compare/v2.1.0...v2.1.1
