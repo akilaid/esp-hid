@@ -63,8 +63,15 @@ void ehbGuiSetRunning(int running);
 // Swaps the menu-bar image so remote mode is visible at a glance — the one
 // piece of feedback the legacy macOS app never surfaced.
 void ehbGuiSetRemoteActive(int active);
-// A missing-permission (or secure-input) banner above the status rows.
-void ehbGuiSetBanner(const char *message, int visible, int showGrantButtons);
+// The strip above the status rows: a missing permission, Secure Input, or an
+// available update. buttons selects which row of buttons accompanies it —
+// EHB_BANNER_PERMISSION (Grant / Open System Settings) or EHB_BANNER_UPDATE
+// (Install and relaunch) — and isError picks the red text. When hidden the
+// strip collapses and the window shrinks with it.
+enum { EHB_BANNER_NONE = 0, EHB_BANNER_PERMISSION = 1, EHB_BANNER_UPDATE = 2 };
+void ehbGuiSetBanner(const char *message, int visible, int buttons, int isError);
+// The check mark on the "Check for Updates Automatically" menu item.
+void ehbGuiSetAutoUpdateChecked(int checked);
 void ehbGuiShowAlert(const char *title, const char *message, int isError);
 
 // anchor is a System Settings pane anchor, e.g. "Privacy_Accessibility".

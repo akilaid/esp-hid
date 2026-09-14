@@ -21,20 +21,21 @@ const (
 
 // Config is the resolved runtime configuration.
 type Config struct {
-	PortOverride    string        // empty = auto-discover by USB VID/PID
-	DeviceSerial    string        // bridge's USB serial; learned, not typed
-	MoveRateHz      int           // movement send rate
-	MoveDeadzone    int           // per-axis deadzone in pixels
-	MoveSmoothing   float64       // micro-smoothing factor [0,1)
-	AdaptiveMoves   bool          // backpressure on movement sends
-	LeftwardReturn  bool          // left-swipe return gesture
-	SlaveWidth      int           // virtual slave resolution
+	PortOverride    string  // empty = auto-discover by USB VID/PID
+	DeviceSerial    string  // bridge's USB serial; learned, not typed
+	MoveRateHz      int     // movement send rate
+	MoveDeadzone    int     // per-axis deadzone in pixels
+	MoveSmoothing   float64 // micro-smoothing factor [0,1)
+	AdaptiveMoves   bool    // backpressure on movement sends
+	LeftwardReturn  bool    // left-swipe return gesture
+	SlaveWidth      int     // virtual slave resolution
 	SlaveHeight     int
-	HostSide        string        // left|right|top|bottom
+	HostSide        string // left|right|top|bottom
 	ReconnectDelay  time.Duration
 	CaptureKeyboard bool
 	ToggleHotkey    string // e.g. "F9", "Ctrl+Alt+F9"
 	AutoSwitch      bool
+	CheckUpdates    bool // GUI may look for newer releases; installing is always a click
 	GUIMode         bool
 	CLIMode         bool // headless diagnostics mode
 
@@ -58,6 +59,7 @@ func Defaults() Config {
 		CaptureKeyboard: true,
 		ToggleHotkey:    "F9",
 		AutoSwitch:      true,
+		CheckUpdates:    true,
 		GUIMode:         true,
 	}
 }
@@ -85,6 +87,7 @@ func Parse(args []string) (Config, error) {
 	keyboard := fs.Bool("keyboard", cfg.CaptureKeyboard, "capture and forward keyboard events")
 	toggle := fs.String("toggle", cfg.ToggleHotkey, "hotkey to toggle remote mode")
 	autoSwitch := fs.Bool("auto-switch", cfg.AutoSwitch, "jump to remote device when the cursor hits the screen edge")
+	checkUpdates := fs.Bool("check-updates", cfg.CheckUpdates, "let the GUI check GitHub for a newer release (never installs by itself)")
 	gui := fs.Bool("gui", cfg.GUIMode, "run with GUI")
 	cli := fs.Bool("cli", false, "headless diagnostics mode (implies -gui=false)")
 	debugStall := fs.Bool("debug-stall-capture", false,
@@ -105,6 +108,7 @@ func Parse(args []string) (Config, error) {
 	cfg.CaptureKeyboard = *keyboard
 	cfg.ToggleHotkey = *toggle
 	cfg.AutoSwitch = *autoSwitch
+	cfg.CheckUpdates = *checkUpdates
 	cfg.GUIMode = *gui && !*cli
 	cfg.CLIMode = *cli
 	cfg.DebugStallCapture = *debugStall

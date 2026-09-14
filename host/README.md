@@ -67,7 +67,32 @@ artwork.
 
 Or download from GitHub Releases (built by
 `.github/workflows/release-v2.yml`, manual dispatch): `esp-hid-bridge.exe`
-for Windows, `ESP-HID-Bridge-<version>.dmg` for macOS.
+for Windows, `ESP-HID-Bridge-<version>.dmg` for macOS. Each release also
+carries `ESP-HID-Bridge-<version>-macos.zip` and `SHA256SUMS`; those are for
+the app's own updater (`internal/update`), not for people.
+
+#### Signing
+
+`build-macos.sh` signs with a certificate named **ESP HID Bridge** when the
+keychain has one, and ad-hoc otherwise. The difference matters: macOS ties
+the Accessibility and Input Monitoring grants to the signature, and an
+ad-hoc signature changes with every build, so without a certificate every
+update costs the user both grants again. The certificate is self-signed — no
+Apple Developer account — which is enough for the grants to persist; it
+does not notarize, so the first install still meets Gatekeeper (below).
+
+To set it up once, on the machine you build on:
+
+```bash
+./packaging/macos/make-signing-cert.sh
+```
+
+That creates the certificate, installs it in the login keychain, exports a
+`.p12`, and prints the two `gh secret set` commands that give the release
+workflow the same certificate (`MACOS_SIGNING_CERT_P12`,
+`MACOS_SIGNING_CERT_PASSWORD`). Keep the `.p12` and its password: a new
+certificate means one more round of grants for everyone. `SIGNING_IDENTITY`
+in the environment overrides the lookup by name.
 
 ## Switching, on macOS
 
@@ -178,9 +203,10 @@ effect, quit and reopen the app.
 Two macOS behaviours worth knowing:
 
 - **Permissions are tied to the app's code signature, not its path.** The
-  release build is ad-hoc signed, so its signature changes with every
-  version and the grants must be renewed after an update. To reset a state
-  that has got confused:
+  release build is signed with one stable certificate (see *Signing* under
+  Build), so the grants carry over from version to version; a build without
+  that certificate is ad-hoc signed and loses them on every rebuild. To reset
+  a state that has got confused:
   ```bash
   tccutil reset Accessibility com.espbridge.hid-bridge
   tccutil reset ListenEvent com.espbridge.hid-bridge
@@ -216,6 +242,10 @@ Security**, scroll to the Security section, and click **Open Anyway**.
 Removing quarantine does not weaken the signature; `codesign --verify`
 still passes afterwards. The only way to avoid the prompt entirely is a paid
 Apple Developer ID plus notarization, which this project does not use.
+
+This is a first-install matter. Updates installed by the app itself are
+downloaded by the app, not a browser, so they never carry the quarantine
+attribute and never meet this dialog.
 
 ## Test
 

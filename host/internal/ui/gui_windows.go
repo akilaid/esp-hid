@@ -50,6 +50,14 @@ type gui struct {
 	deviceCombo   *walk.ComboBox
 	orientCombo   *walk.ComboBox
 
+	// The update notice row in the status group, hidden until a newer
+	// release is found; walk gives a hidden widget no space.
+	updateRow        *walk.Composite
+	updateLabel      *walk.Label
+	updateButton     *walk.PushButton
+	autoUpdateAction *walk.Action
+	updater          *updater
+
 	// The rows in deviceCombo's list, in display order.
 	deviceMatches []DeviceMatch
 	// True while this code is writing to the device-layout controls, so the
@@ -62,8 +70,9 @@ type gui struct {
 	exiting    bool
 }
 
-// Run builds the window and enters the message loop.
-func Run(cfg config.Config) error {
+// Run builds the window and enters the message loop. version is the build's
+// release tag, which the update check compares against; "dev" disables it.
+func Run(cfg config.Config, version string) error {
 	app := &gui{
 		cfg:    cfg,
 		events: make(chan bridge.Event, 256),
@@ -73,6 +82,22 @@ func Run(cfg config.Config) error {
 	if err := app.build(); err != nil {
 		return err
 	}
+	app.updater = newUpdater(version,
+		func(fn func()) { app.mw.Synchronize(fn) },
+		app.showUpdate,
+		func(title, message string, isError bool) {
+			style := walk.MsgBoxIconInformation
+			if isError {
+				style = walk.MsgBoxIconError
+			}
+			walk.MsgBox(app.mw, title, message, style)
+		},
+		func() {
+			app.exiting = true
+			app.mw.Close()
+		})
+	app.updater.setEnabled(cfg.CheckUpdates)
+	app.updater.start()
 	app.loadIcons()
 	app.setupTray()
 	defer func() {
@@ -109,6 +134,24 @@ func (app *gui) build() error {
 		MinSize:  Size{Width: 560, Height: 440},
 		Size:     Size{Width: 580, Height: 460},
 		Layout:   VBox{},
+		MenuItems: []MenuItem{
+			Menu{
+				Text: "&Help",
+				Items: []MenuItem{
+					Action{
+						Text:        "Check for &updates…",
+						OnTriggered: func() { app.updater.checkNow() },
+					},
+					Action{
+						AssignTo:    &app.autoUpdateAction,
+						Text:        "Check for updates &automatically",
+						Checkable:   true,
+						Checked:     app.cfg.CheckUpdates,
+						OnTriggered: app.toggleAutoUpdates,
+					},
+				},
+			},
+		},
 		Children: []Widget{
 			GroupBox{
 				Title:  "Connection && Status",
@@ -122,6 +165,21 @@ func (app *gui) build() error {
 					Label{AssignTo: &app.fwLabel, Text: "-"},
 					Label{Text: "Bluetooth:"},
 					Label{AssignTo: &app.bleLabel, Text: "-"},
+					Composite{
+						AssignTo:   &app.updateRow,
+						Layout:     HBox{MarginsZero: true},
+						ColumnSpan: 2,
+						Visible:    false,
+						Children: []Widget{
+							Label{AssignTo: &app.updateLabel},
+							PushButton{
+								AssignTo:  &app.updateButton,
+								Text:      "Install and restart",
+								OnClicked: func() { app.updater.install() },
+							},
+							HSpacer{},
+						},
+					},
 					Composite{
 						Layout:     HBox{MarginsZero: true},
 						ColumnSpan: 2,
@@ -351,6 +409,22 @@ func (app *gui) setResolution(value string) {
 		_ = app.orientCombo.SetCurrentIndex(index)
 	}
 	app.syncing = false
+}
+
+// showUpdate is the updater's notice callback: text in the status group
+// with the install button beside it, or nothing at all.
+func (app *gui) showUpdate(text string, installable bool) {
+	app.updateLabel.SetText(text)
+	app.updateButton.SetVisible(installable)
+	app.updateRow.SetVisible(text != "")
+}
+
+func (app *gui) toggleAutoUpdates() {
+	app.cfg.CheckUpdates = app.autoUpdateAction.Checked()
+	app.updater.setEnabled(app.cfg.CheckUpdates)
+	if err := config.Save(app.cfg); err != nil {
+		log.Printf("settings save failed: %v", err)
+	}
 }
 
 func (app *gui) readConfigFromForm() error {

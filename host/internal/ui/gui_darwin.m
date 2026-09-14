@@ -17,6 +17,9 @@ extern void goGuiDeviceSearchChanged(char *text);
 extern void goGuiDeviceMatchSelected(int index);
 extern void goGuiOrientationChanged(int index);
 extern void goGuiResolutionEdited(char *text);
+extern void goGuiUpdateClicked(void);
+extern void goGuiCheckUpdatesClicked(void);
+extern void goGuiToggleAutoUpdatesClicked(void);
 
 // Fixed-size window: the layout is hand-placed, which is a fair trade for a
 // settings form that never needs to resize and keeps this file free of
@@ -25,6 +28,11 @@ static const CGFloat kWindowWidth = 620;
 static const CGFloat kWindowHeight = 635;
 static const CGFloat kMargin = 20;
 static const CGFloat kRowHeight = 22;
+// The status box is tallest with the permission banner and its buttons on
+// top. Without them that strip is dead space, so the box and the window give
+// it up; every other frame is anchored to the bottom and stays put.
+static const CGFloat kStatusBoxHeight = 265;
+static const CGFloat kBannerStripHeight = 65;
 
 @interface EHBController
     : NSObject <NSApplicationDelegate, NSWindowDelegate, NSComboBoxDelegate,
@@ -58,9 +66,12 @@ static NSTextField *gStatusDevice = nil;
 static NSTextField *gStatusFirmware = nil;
 static NSTextField *gStatusBluetooth = nil;
 
+static NSBox *gStatusBox = nil;
 static NSTextField *gBanner = nil;
 static NSButton *gGrantButton = nil;
 static NSButton *gSettingsButton = nil;
+static NSButton *gUpdateButton = nil;
+static NSMenuItem *gAutoUpdateItem = nil;
 
 static NSButton *gStartButton = nil;
 static NSButton *gStopButton = nil;
@@ -228,6 +239,21 @@ static void acceptSuggestion(NSInteger row) {
 - (void)settingsClicked:(id)sender {
   (void)sender;
   goGuiOpenSettingsClicked();
+}
+
+- (void)updateClicked:(id)sender {
+  (void)sender;
+  goGuiUpdateClicked();
+}
+
+- (void)checkUpdatesClicked:(id)sender {
+  (void)sender;
+  goGuiCheckUpdatesClicked();
+}
+
+- (void)toggleAutoUpdatesClicked:(id)sender {
+  (void)sender;
+  goGuiToggleAutoUpdatesClicked();
 }
 
 - (void)openWindow:(id)sender {
@@ -416,6 +442,18 @@ static void buildMenuBar(void) {
                      action:@selector(orderFrontStandardAboutPanel:)
               keyEquivalent:@""];
   [appMenu addItem:[NSMenuItem separatorItem]];
+  NSMenuItem *check = [[NSMenuItem alloc] initWithTitle:@"Check for Updates…"
+                                                 action:@selector(checkUpdatesClicked:)
+                                          keyEquivalent:@""];
+  [check setTarget:gController];
+  [appMenu addItem:check];
+  gAutoUpdateItem = [[NSMenuItem alloc]
+      initWithTitle:@"Check for Updates Automatically"
+             action:@selector(toggleAutoUpdatesClicked:)
+      keyEquivalent:@""];
+  [gAutoUpdateItem setTarget:gController];
+  [appMenu addItem:gAutoUpdateItem];
+  [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:@"Hide ESP HID Bridge"
                      action:@selector(hide:)
               keyEquivalent:@"h"];
@@ -573,7 +611,8 @@ static void buildWindow(void) {
   NSView *root = [gWindow contentView];
 
   // --- Connection & Status -----------------------------------------------
-  NSBox *statusBox = makeBox(root, @"Connection & Status", 350, 265);
+  NSBox *statusBox = makeBox(root, @"Connection & Status", 350, kStatusBoxHeight);
+  gStatusBox = statusBox;
   NSView *sv = [statusBox contentView];
   CGFloat sw = NSWidth([sv bounds]);
 
@@ -587,6 +626,10 @@ static void buildWindow(void) {
                                @selector(settingsClicked:));
   [gGrantButton setHidden:YES];
   [gSettingsButton setHidden:YES];
+  // Shares the row with the permission buttons; only one set shows at once.
+  gUpdateButton = makeButton(sv, @"Install and relaunch", 0, 175, 170,
+                             @selector(updateClicked:));
+  [gUpdateButton setHidden:YES];
 
   const CGFloat labelWidth = 90;
   const CGFloat valueX = 100;
@@ -841,13 +884,43 @@ void ehbGuiSetRemoteActive(int active) {
                         : @"ESP HID Bridge"];
 }
 
-void ehbGuiSetBanner(const char *message, int visible, int showGrantButtons) {
+// Grows or shrinks the status box and the window by the banner strip. The
+// window keeps its top edge, so from the user's side the bottom simply moves
+// up when a permission lands. Animated only once the window is on screen;
+// the initial call happens before it is shown.
+static void layoutBannerStrip(BOOL visible) {
+  CGFloat boxHeight = visible ? kStatusBoxHeight : kStatusBoxHeight - kBannerStripHeight;
+  if (NSHeight([gStatusBox frame]) == boxHeight) {
+    return;
+  }
+  NSRect box = [gStatusBox frame];
+  box.size.height = boxHeight;
+  [gStatusBox setFrame:box];
+
+  CGFloat windowHeight = visible ? kWindowHeight : kWindowHeight - kBannerStripHeight;
+  NSRect frame = [gWindow frame];
+  CGFloat delta = windowHeight - NSHeight([gWindow contentRectForFrameRect:frame]);
+  frame.origin.y -= delta;
+  frame.size.height += delta;
+  [gWindow setFrame:frame display:YES animate:[gWindow isVisible]];
+}
+
+void ehbGuiSetBanner(const char *message, int visible, int buttons, int isError) {
   if (message) {
     [gBanner setStringValue:[NSString stringWithUTF8String:message]];
   }
+  [gBanner setTextColor:isError ? [NSColor systemRedColor] : [NSColor labelColor]];
   [gBanner setHidden:visible ? NO : YES];
-  [gGrantButton setHidden:(visible && showGrantButtons) ? NO : YES];
-  [gSettingsButton setHidden:(visible && showGrantButtons) ? NO : YES];
+  BOOL permission = visible && buttons == EHB_BANNER_PERMISSION;
+  BOOL update = visible && buttons == EHB_BANNER_UPDATE;
+  [gGrantButton setHidden:permission ? NO : YES];
+  [gSettingsButton setHidden:permission ? NO : YES];
+  [gUpdateButton setHidden:update ? NO : YES];
+  layoutBannerStrip(visible ? YES : NO);
+}
+
+void ehbGuiSetAutoUpdateChecked(int checked) {
+  [gAutoUpdateItem setState:checked ? NSControlStateValueOn : NSControlStateValueOff];
 }
 
 void ehbGuiShowAlert(const char *title, const char *message, int isError) {

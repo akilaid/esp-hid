@@ -226,7 +226,23 @@ Never block in the tap callback — only the non-blocking `publish` is allowed.
 
 macOS also gates capture behind two separate TCC permissions (Accessibility
 *and* Input Monitoring), keyed on **code signature, not path** — so an ad-hoc
-signed build loses its grant on every rebuild.
+signed build loses its grant on every rebuild. Release builds and local
+builds are therefore signed with one self-signed certificate named "ESP HID
+Bridge" (`packaging/macos/make-signing-cert.sh` creates it; `build-macos.sh`
+finds it by name, CI imports it from `MACOS_SIGNING_CERT_P12`). Without it
+the scripts fall back to ad-hoc and say so.
+
+### Self-update
+`internal/update` checks GitHub Releases, verifies the download against the
+release's `SHA256SUMS`, and swaps the program in place: on macOS the zip is
+unpacked with `ditto` into a staging dir *beside* the bundle (same volume, so
+the two renames are atomic), `codesign --verify` gates the swap, the old
+bundle is kept as `.previous` until the next launch, and a detached shell
+`open`s the app once this process has exited; on Windows the running exe is
+renamed to `.old` (allowed while running; overwriting is not) and the new one
+started. `ui/updates.go` is the shared state machine both GUIs drive; it
+never installs without a click. Dev builds (`version` not a tag) never see
+updates — `update.ErrDevBuild`.
 
 ### Config
 `internal/config` resolves defaults → `settings-v2.json` → CLI flags. Every

@@ -30,6 +30,7 @@ type persistedSettings struct {
 	CaptureKeyboard *bool    `json:"captureKeyboard,omitempty"`
 	ToggleHotkey    *string  `json:"toggleHotkeyName,omitempty"`
 	AutoSwitch      *bool    `json:"autoSwitch,omitempty"`
+	CheckUpdates    *bool    `json:"checkUpdates,omitempty"`
 	GUIMode         *bool    `json:"guiMode,omitempty"`
 }
 
@@ -98,6 +99,9 @@ func (p persistedSettings) applyTo(cfg *Config) {
 	if p.AutoSwitch != nil {
 		cfg.AutoSwitch = *p.AutoSwitch
 	}
+	if p.CheckUpdates != nil {
+		cfg.CheckUpdates = *p.CheckUpdates
+	}
 	if p.GUIMode != nil {
 		cfg.GUIMode = *p.GUIMode
 	}
@@ -129,6 +133,7 @@ func Save(cfg Config) error {
 		CaptureKeyboard: &cfg.CaptureKeyboard,
 		ToggleHotkey:    &cfg.ToggleHotkey,
 		AutoSwitch:      &cfg.AutoSwitch,
+		CheckUpdates:    &cfg.CheckUpdates,
 		GUIMode:         &cfg.GUIMode,
 	}
 	return writeSettings(path, settings)

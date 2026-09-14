@@ -117,6 +117,22 @@ you through granting.
 - No Bluetooth client connected: the LED stays on.
 - Client connected: a 200 ms pulse every 20 seconds.
 
+## Updates
+
+The app checks GitHub Releases for a newer version shortly after launch and
+once a day after that, and says so in the window when it finds one. Nothing
+is installed until you click **Install and relaunch** (Windows: **Install
+and restart**): the package is downloaded, checked against the release's
+`SHA256SUMS`, swapped in for the running program, and the app relaunches.
+**Check for Updates…** in the app menu (Windows: Help menu) asks on demand;
+**Check for Updates Automatically** in the same menu, or `-check-updates=false`,
+turns the scheduled check off. Development builds never update.
+
+On macOS the app's own download carries no quarantine flag, so updates skip
+the Gatekeeper step a browser download needs, and the release build is
+signed with one stable certificate so the Accessibility and Input Monitoring
+grants carry over from version to version.
+
 ## Settings
 
 Stored as JSON and re-read at startup; explicit command-line flags override
@@ -143,6 +159,8 @@ Both platforms accept the same flags.
   for a device held sideways; the flag takes the final numbers.
 - `-host-side`: where this computer sits relative to the device
   (`left|right|top|bottom`, default `left`).
+- `-check-updates`: let the GUI look for newer releases (default `true`).
+  It never installs on its own.
 - `-leftreturn`: allow returning by a quick left-swipe (default `false`).
 - `-reconnect`: reconnect delay after a link failure (default `750ms`).
 - `-keyboard`: forward keyboard events (default `true`).

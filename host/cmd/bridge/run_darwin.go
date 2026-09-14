@@ -15,7 +15,7 @@ func run(cfg config.Config) error {
 		return runCLI(cfg)
 	}
 	if cfg.GUIMode {
-		return ui.Run(cfg)
+		return ui.Run(cfg, version)
 	}
 	return runHeadlessBridge(cfg)
 }

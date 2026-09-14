@@ -41,10 +41,16 @@ type darwinGUI struct {
 	runtime *bridge.Runtime
 	events  chan bridge.Event
 
-	running        bool
-	permissionsOK  bool
-	autoStartDone  bool
-	secureInputWas bool
+	running       bool
+	permissionsOK bool
+	autoStartDone bool
+	secureInput   bool
+
+	// What the update strip should say when no permission problem outranks
+	// it, and whether the install button goes with it.
+	updateText        string
+	updateInstallable bool
+	updater           *updater
 
 	// The rows of the device suggestions list, in display order.
 	deviceMatches []DeviceMatch
@@ -60,14 +66,25 @@ var app *darwinGUI
 
 // Run builds the window and enters the AppKit event loop. It must be called
 // from the main goroutine, which cmd/bridge pins to the main OS thread.
-func Run(cfg config.Config) error {
+// version is the build's release tag, which the update check compares
+// against; "dev" disables it.
+func Run(cfg config.Config, version string) error {
 	app = &darwinGUI{
 		cfg:    cfg,
 		events: make(chan bridge.Event, 256),
 	}
 	app.runtime = bridge.New(app.events)
+	app.updater = newUpdater(version, onMain,
+		func(text string, installable bool) {
+			app.updateText, app.updateInstallable = text, installable
+			app.refreshBanner()
+		},
+		showAlert,
+		func() { C.ehbGuiTerminate() })
+	app.updater.setEnabled(cfg.CheckUpdates)
 
 	C.ehbGuiInit()
+	C.ehbGuiSetAutoUpdateChecked(cBool(cfg.CheckUpdates))
 
 	for _, choice := range SlaveResolutionChoices {
 		cValue := C.CString(choice)
@@ -105,6 +122,7 @@ func Run(cfg config.Config) error {
 	// capture layer would fail immediately and the user would see an error
 	// instead of the thing they can actually act on.
 	app.refreshPermissions()
+	app.updater.start()
 
 	C.ehbGuiRun()
 	return nil
@@ -146,9 +164,9 @@ func showAlert(title, message string, isError bool) {
 	C.free(unsafe.Pointer(cMessage))
 }
 
-func setBanner(message string, visible, showButtons bool) {
+func setBanner(message string, visible bool, buttons C.int, isError bool) {
 	cMessage := C.CString(message)
-	C.ehbGuiSetBanner(cMessage, cBool(visible), cBool(showButtons))
+	C.ehbGuiSetBanner(cMessage, cBool(visible), buttons, cBool(isError))
 	C.free(unsafe.Pointer(cMessage))
 }
 
@@ -342,31 +360,18 @@ func (g *darwinGUI) startBridge() {
 // Settings takes effect without the user hunting for a refresh button.
 func (g *darwinGUI) refreshPermissions() {
 	permissions := capture.CheckPermissions()
-	ok := permissions.OK(g.cfg.CaptureKeyboard)
-	g.permissionsOK = ok
+	g.permissionsOK = permissions.OK(g.cfg.CaptureKeyboard)
+	// Secure Event Input is not a permission and cannot be fixed here, but
+	// it makes the keyboard silently stop working, so say so plainly.
+	g.secureInput = capture.SecureInputEnabled()
+	g.refreshBanner()
 
-	if !ok {
-		setBanner(permissions.PermissionHint(g.cfg.CaptureKeyboard)+
-			" — grant it, then reopen this app if nothing happens.", true, true)
+	if !g.permissionsOK {
 		if !g.running {
 			setStatus("Waiting for permission", "", "", "")
 		}
 		return
 	}
-
-	// Secure Event Input is not a permission and cannot be fixed here, but
-	// it makes the keyboard silently stop working, so say so plainly.
-	secureInput := capture.SecureInputEnabled()
-	if secureInput != g.secureInputWas {
-		g.secureInputWas = secureInput
-	}
-	if secureInput && g.cfg.CaptureKeyboard {
-		setBanner("Keyboard blocked: another app has Secure Input enabled "+
-			"(close any password field or sudo prompt).", true, false)
-	} else {
-		setBanner("", false, false)
-	}
-
 	// Permissions are in place: start once, the way the Windows build does.
 	if !g.autoStartDone {
 		g.autoStartDone = true
@@ -374,8 +379,47 @@ func (g *darwinGUI) refreshPermissions() {
 	}
 }
 
+// refreshBanner picks what the strip shows. One thing at a time, most
+// pressing first: a missing permission blocks everything, Secure Input
+// blocks the keyboard, an update can wait.
+func (g *darwinGUI) refreshBanner() {
+	switch {
+	case !g.permissionsOK:
+		setBanner(capture.CheckPermissions().PermissionHint(g.cfg.CaptureKeyboard)+
+			" — grant it, then reopen this app if nothing happens.",
+			true, C.EHB_BANNER_PERMISSION, true)
+	case g.secureInput && g.cfg.CaptureKeyboard:
+		setBanner("Keyboard blocked: another app has Secure Input enabled "+
+			"(close any password field or sudo prompt).", true, C.EHB_BANNER_NONE, true)
+	case g.updateText != "":
+		buttons := C.int(C.EHB_BANNER_NONE)
+		if g.updateInstallable {
+			buttons = C.EHB_BANNER_UPDATE
+		}
+		setBanner(g.updateText, true, buttons, false)
+	default:
+		setBanner("", false, C.EHB_BANNER_NONE, false)
+	}
+}
+
 //export goGuiStartClicked
 func goGuiStartClicked() { app.startBridge() }
+
+//export goGuiUpdateClicked
+func goGuiUpdateClicked() { app.updater.install() }
+
+//export goGuiCheckUpdatesClicked
+func goGuiCheckUpdatesClicked() { app.updater.checkNow() }
+
+//export goGuiToggleAutoUpdatesClicked
+func goGuiToggleAutoUpdatesClicked() {
+	app.cfg.CheckUpdates = !app.cfg.CheckUpdates
+	app.updater.setEnabled(app.cfg.CheckUpdates)
+	C.ehbGuiSetAutoUpdateChecked(cBool(app.cfg.CheckUpdates))
+	if err := config.Save(app.cfg); err != nil {
+		log.Printf("settings save failed: %v", err)
+	}
+}
 
 //export goGuiDeviceSearchChanged
 func goGuiDeviceSearchChanged(text *C.char) { app.deviceSearchChanged(C.GoString(text)) }
