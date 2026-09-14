@@ -92,6 +92,15 @@ lower it.
 **Device resolution** and **This Mac sits** decide which border is the crossing
 point. Both matter even in Manual, since they also drive the automatic return.
 
+You do not have to know the resolution: type part of the phone or tablet's
+name in **Device** and the matches drop down under it, each with its size;
+the best one fills the resolution in as you type, and the arrow keys, Return
+or a click pick another. **Orientation** flips the same two numbers for a
+device held sideways. The field stays editable because the built-in table
+gives the *panel* size, and some phones render lower — a QHD+ Samsung ships
+at FHD+, and a foldable is listed by its inner display — so enter what the
+phone's display settings actually say if they differ.
+
 Returning is automatic either way — push the pointer past the far edge of the
 device's screen and it comes back.
 

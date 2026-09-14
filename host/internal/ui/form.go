@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"esp-hid/host/internal/config"
+	"esp-hid/host/internal/devicedb"
 	"esp-hid/host/internal/hotkey"
 	"esp-hid/host/internal/protocol"
 )
@@ -29,6 +30,90 @@ var SlaveResolutionChoices = []string{
 // Order is load-bearing: the GUIs address these by index.
 var HostSideChoices = []string{
 	config.HostSideLeft, config.HostSideRight, config.HostSideTop, config.HostSideBottom,
+}
+
+// OrientationChoices is the Portrait/Landscape picker, addressed by index
+// like HostSideChoices. Orientation is not a setting of its own: it is read
+// off the resolution (portrait when width <= height) and flipping it swaps
+// the two numbers. The resolution stays the single thing that is saved.
+var OrientationChoices = []string{"Portrait", "Landscape"}
+
+const (
+	OrientationPortrait  = 0
+	OrientationLandscape = 1
+)
+
+// MaxDeviceMatches caps the device picker's dropdown; past this the user is
+// better served by typing another word than by scrolling.
+const MaxDeviceMatches = 50
+
+// ResolutionHint sits under the resolution field in both GUIs. The device
+// table is a starting point: a phone can render below its panel size, and
+// then the panel size is the wrong number.
+const ResolutionHint = "Panel pixels — if the phone renders lower (e.g. FHD+ on a QHD+ Samsung), enter that instead."
+
+// DeviceMatch is one row of the device picker's list. Label is what the row
+// shows; Name is what goes back into the search field once it is picked, so
+// the field reads "Samsung Galaxy S24 Ultra" rather than the label with its
+// size in brackets.
+type DeviceMatch struct {
+	Label      string
+	Name       string
+	Resolution string
+}
+
+// DeviceMatches runs the picker search. Empty input yields nothing, so the
+// dropdown is empty until the user types.
+func DeviceMatches(query string) []DeviceMatch {
+	devices := devicedb.Search(query, MaxDeviceMatches)
+	matches := make([]DeviceMatch, 0, len(devices))
+	for _, d := range devices {
+		matches = append(matches, DeviceMatch{
+			Label:      d.Label(),
+			Name:       d.Brand + " " + d.Name,
+			Resolution: d.Resolution(),
+		})
+	}
+	return matches
+}
+
+// OrientationIndexOf reads the orientation off a resolution string, or -1 if
+// it does not parse. A square counts as portrait so the toggle always shows
+// one of its two states for valid input.
+func OrientationIndexOf(resolution string) int {
+	width, height, err := config.ParseResolution(resolution)
+	if err != nil {
+		return -1
+	}
+	if width > height {
+		return OrientationLandscape
+	}
+	return OrientationPortrait
+}
+
+// OrientResolution rewrites resolution to the given orientation, swapping the
+// two numbers if its shape disagrees. The second result is false when the
+// text does not parse or the index is not one of OrientationChoices; the
+// caller should then leave the field alone rather than clobber what the user
+// is typing.
+func OrientResolution(resolution string, orientation int) (string, bool) {
+	width, height, err := config.ParseResolution(resolution)
+	if err != nil {
+		return resolution, false
+	}
+	switch orientation {
+	case OrientationPortrait:
+		if width > height {
+			width, height = height, width
+		}
+	case OrientationLandscape:
+		if width < height {
+			width, height = height, width
+		}
+	default:
+		return resolution, false
+	}
+	return fmt.Sprintf("%dx%d", width, height), true
 }
 
 // Limits on the move send rate. Below 1 nothing would ever be sent; above 500

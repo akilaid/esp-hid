@@ -139,7 +139,8 @@ Both platforms accept the same flags.
 - `-smooth`: micro-smoothing factor for small movement (default `0.2`).
 - `-adaptive`: adapt send cadence when the link is congested (default `true`).
 - `-slave-res`: device resolution `WIDTHxHEIGHT` for edge-aware return
-  (default `1920x1080`).
+  (default `1920x1080`). The GUIs can look this up by device name and flip it
+  for a device held sideways; the flag takes the final numbers.
 - `-host-side`: where this computer sits relative to the device
   (`left|right|top|bottom`, default `left`).
 - `-leftreturn`: allow returning by a quick left-swipe (default `false`).

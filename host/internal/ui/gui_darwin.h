@@ -37,9 +37,23 @@ void ehbGuiTerminate(void);
 
 void ehbGuiAddResolution(const char *value);
 void ehbGuiAddHostSide(const char *value);
+void ehbGuiAddOrientation(const char *value);
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
                    int autoSwitch, const char *resolution, int hostSideIndex);
 EhbForm ehbGuiReadForm(void);
+
+// The device picker and orientation toggle are helpers that write into the
+// resolution field; only the resolution is read back. Go owns the search and
+// the match list, and pushes the rows here as plain strings: label is what
+// the list shows, name is what the field reads once a row is picked. Show
+// lays the list out under the field, or hides it when there are no rows.
+void ehbGuiClearDeviceMatches(void);
+void ehbGuiAddDeviceMatch(const char *label, const char *name);
+void ehbGuiShowDeviceMatches(void);
+void ehbGuiSelectDeviceMatch(int index);
+void ehbGuiSetResolution(const char *value);
+void ehbGuiSetOrientation(int index);
+void ehbGuiSetResolutionHint(const char *text);
 
 // --- Updating the display ------------------------------------------------
 

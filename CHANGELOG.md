@@ -8,6 +8,37 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.2.0] — 2026-09-14
+
+### Added
+
+- **Device** search in both GUIs: type part of a phone or tablet name and the
+  best match fills in the resolution; the dropdown lists the other matches,
+  each with its size. Backed by a built-in table of about 19,000 phones and
+  tablets plus current iPhones and iPads, embedded in the binary.
+- **Orientation** picker (Portrait / Landscape) that flips the resolution for
+  a device held sideways. It is read off the resolution rather than stored, so
+  nothing changes in `settings-v2.json`.
+- A hint under the resolution field: the table gives the panel size, and a
+  phone that renders lower (FHD+ on a QHD+ Samsung, say) needs that value
+  instead. The field remains editable for exactly this.
+
+## [2.1.2] — 2026-09-14
+
+### Fixed
+
+- Leaving remote mode put the host cursor back on the correct edge but always
+  at its centre. It now reappears level with the row or column where the
+  pointer crossed over, on the same monitor as before.
+
+## [2.1.1] — 2026-09-10
+
+### Fixed
+
+- Firmware reported a hardcoded `1.0.0` in HELLO; it now reports the release
+  version it was built from.
+- `app_main` had too little stack to survive a BLE report-map change.
+
 ## [2.1.0] — 2026-09-09
 
 ### Added
@@ -140,6 +171,9 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.2.0]: https://github.com/akilaid/esp-hid/compare/v2.1.2...v2.2.0
+[2.1.2]: https://github.com/akilaid/esp-hid/compare/v2.1.1...v2.1.2
+[2.1.1]: https://github.com/akilaid/esp-hid/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/akilaid/esp-hid/compare/v2.0.10...v2.1.0
 [2.0.10]: https://github.com/akilaid/esp-hid/compare/v2.0.9...v2.0.10
 [2.0.9]: https://github.com/akilaid/esp-hid/compare/v2.0.8...v2.0.9
