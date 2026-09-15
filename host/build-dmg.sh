@@ -72,6 +72,11 @@ device=$(hdiutil attach -readwrite -noverify -noautoopen "$RW_DMG" |
   awk '/^\/dev\// {print $1; exit}')
 mount_point="/Volumes/$VOLUME_NAME"
 
+# Spotlight starts indexing a freshly mounted volume, and an indexer holding
+# files open is one of the two things that make the detach below fail with
+# "Resource busy". Turn it off for this volume; it is thrown away anyway.
+mdutil -i off "$mount_point" >/dev/null 2>&1 || true
+
 # Give the Finder a moment to notice the new volume before scripting it.
 sleep 2
 
@@ -113,7 +118,27 @@ fi
 sync
 
 echo "  detaching"
-hdiutil detach "$device" >/dev/null || hdiutil detach "$device" -force >/dev/null
+# The other thing that holds the volume is the Finder itself, for a few
+# seconds after it has been scripted; the v2.4.0 release lost its macOS build
+# to exactly this, both a plain and a forced detach failing at once. Close
+# the window, then keep trying for a while before resorting to force.
+osascript -e "tell application \"Finder\" to close (every window whose name is \"$VOLUME_NAME\")" \
+  >/dev/null 2>&1 || true
+detached=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if hdiutil detach "$device" >/dev/null 2>&1; then
+    detached=1
+    break
+  fi
+  sleep 2
+done
+if [ "$detached" -eq 0 ]; then
+  echo "    volume still busy after 20 s; forcing" >&2
+  hdiutil detach "$device" -force >/dev/null || {
+    sleep 5
+    hdiutil detach "$device" -force >/dev/null
+  }
+fi
 
 echo "  converting to compressed read-only image"
 hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$FINAL_DMG" >/dev/null
@@ -134,7 +159,11 @@ echo
 echo "Built: $SCRIPT_DIR/$FINAL_DMG"
 echo "  $(du -h "$FINAL_DMG" | awk '{print $1}')"
 echo
-echo "Reminder: the app inside is ad-hoc signed, not notarized. On first"
-echo "launch macOS will refuse to open it until the user runs:"
+if [ -n "$SIGNING_IDENTITY" ]; then
+  echo "Reminder: the app inside is signed as \"$SIGNING_IDENTITY\" but not"
+else
+  echo "Reminder: the app inside is ad-hoc signed, not"
+fi
+echo "notarized. On first launch macOS will refuse to open it until the user runs:"
 echo "  xattr -dr com.apple.quarantine \"/Applications/$APP_NAME.app\""
 echo "or approves it under System Settings > Privacy & Security > Open Anyway."

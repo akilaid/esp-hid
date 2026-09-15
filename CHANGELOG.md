@@ -8,6 +8,16 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.4.1] — 2026-09-15
+
+### Fixed
+
+- The 2.4.0 release has no macOS build: the disk-image step failed to
+  detach the freshly styled volume on the CI runner ("Resource busy").
+  The script now stops Spotlight indexing the volume, closes the Finder
+  window it scripted, and retries the detach before forcing it. No change
+  to the app itself.
+
 ## [2.4.0] — 2026-09-15
 
 ### Changed
@@ -218,6 +228,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.4.1]: https://github.com/akilaid/esp-hid/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/akilaid/esp-hid/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/akilaid/esp-hid/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/akilaid/esp-hid/compare/v2.1.2...v2.2.0
