@@ -10,6 +10,7 @@ package ui
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -24,10 +25,8 @@ import (
 	"esp-hid/host/internal/config"
 )
 
-const (
-	iconResourceIDApp        = 1
-	iconResourceIDRemoteMode = 2
-)
+// RT_GROUP_ICON, the resource type an icon is loaded by.
+const rtGroupIcon = 14
 
 type gui struct {
 	cfg     config.Config
@@ -345,14 +344,59 @@ func (app *gui) build() error {
 	return nil
 }
 
+// loadIcons takes the exe's two icons — app.ico for the window, the tray
+// and the taskbar, on.ico for the tray while remote mode is active — from
+// the resources build-production.ps1 embeds.
+//
+// The IDs are not fixed. rsrc numbers every resource from one counter: the
+// manifest is 1, then each icon's group is followed by one entry per image
+// it contains, so app.ico's group is 2 and on.ico's is 2 + 1 + (images in
+// app.ico). The old constants 1 and 2 named the manifest and the app icon,
+// which is why the window and taskbar showed Windows' stock icon and the
+// tray only got the app icon while remote mode was on. Enumerating the
+// groups in resource order stays right when the art changes.
 func (app *gui) loadIcons() {
-	if icon, err := walk.NewIconFromResourceId(iconResourceIDApp); err == nil {
-		app.iconApp = icon
-		app.mw.SetIcon(icon)
+	ids := iconGroupIDs()
+	if len(ids) > 0 {
+		if icon, err := walk.NewIconFromResourceId(ids[0]); err == nil {
+			app.iconApp = icon
+			app.mw.SetIcon(icon)
+		} else {
+			log.Printf("app icon (resource %d): %v", ids[0], err)
+		}
 	}
-	if icon, err := walk.NewIconFromResourceId(iconResourceIDRemoteMode); err == nil {
-		app.iconRemote = icon
+	if len(ids) > 1 {
+		if icon, err := walk.NewIconFromResourceId(ids[1]); err == nil {
+			app.iconRemote = icon
+		} else {
+			log.Printf("remote-mode icon (resource %d): %v", ids[1], err)
+		}
 	}
+	if len(ids) < 2 {
+		log.Printf("expected two icon groups in the executable, found %d", len(ids))
+	}
+}
+
+var (
+	guiKernel32              = windows.NewLazySystemDLL("kernel32.dll")
+	procGuiEnumResourceNames = guiKernel32.NewProc("EnumResourceNamesW")
+)
+
+// iconGroupIDs lists the integer ids of the executable's RT_GROUP_ICON
+// resources in ascending order — the order the icons were given to rsrc.
+func iconGroupIDs() []int {
+	var ids []int
+	callback := windows.NewCallback(func(_ uintptr, _ uintptr, name uintptr, _ uintptr) uintptr {
+		// MAKEINTRESOURCE: an integer id is passed with the high word zero;
+		// anything else is a pointer to a string name, which rsrc never uses.
+		if name>>16 == 0 {
+			ids = append(ids, int(name))
+		}
+		return 1
+	})
+	procGuiEnumResourceNames.Call(0, rtGroupIcon, callback, 0)
+	sort.Ints(ids)
+	return ids
 }
 
 func (app *gui) setupTray() {
