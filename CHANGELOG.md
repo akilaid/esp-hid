@@ -8,6 +8,30 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.4.0] — 2026-09-15
+
+### Changed
+
+- The "This Mac sits / This PC sits" dropdown is gone. In its place the
+  Device Layout box shows your displays as the OS has them arranged — every
+  monitor in place, named, the primary marked — with the device beside them.
+  Drag the device to a side of the desktop to choose it. What is saved is
+  unchanged (`hostSide`), and so is the switching behaviour.
+- Monitors and the device are drawn to scale: monitors at the physical size
+  they report, the device from its resolution and pixel density. The built-in
+  device table now carries density, and a typed-in resolution borrows the
+  density of known devices of that size.
+- Windows has the same picture, compile-checked only.
+
+### Added
+
+- A **Check for Updates…** button in the window, next to Start and Stop.
+- The update check now *asks*: a prompt with that release's changelog and
+  **Install and Relaunch** / **Later**. Later keeps the offer in the window
+  and the daily check stays quiet about that version until a newer one
+  appears. Releases carry their CHANGELOG section as the release body, which
+  is what the prompt shows.
+
 ## [2.3.0] — 2026-09-14
 
 ### Added
@@ -194,6 +218,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.4.0]: https://github.com/akilaid/esp-hid/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/akilaid/esp-hid/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/akilaid/esp-hid/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/akilaid/esp-hid/compare/v2.1.1...v2.1.2

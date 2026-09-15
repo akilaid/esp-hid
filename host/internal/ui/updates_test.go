@@ -8,11 +8,14 @@ import (
 )
 
 type updaterProbe struct {
-	notices  []string
-	buttons  []bool
-	alerts   []string
-	quitted  int
-	onMainNo int
+	notices   []string
+	buttons   []bool
+	alerts    []string
+	asked     []string // notes shown with each prompt
+	answer    bool     // what the user says to the prompt
+	installed int
+	quitted   int
+	onMainNo  int
 }
 
 func newProbeUpdater(version string) (*updater, *updaterProbe) {
@@ -24,14 +27,16 @@ func newProbeUpdater(version string) (*updater, *updaterProbe) {
 			p.buttons = append(p.buttons, installable)
 		},
 		func(title, message string, isError bool) { p.alerts = append(p.alerts, title) },
+		func(title, message, notes string) bool { p.asked = append(p.asked, notes); return p.answer },
 		func() { p.quitted++ },
 	)
+	u.installNow = func() { p.installed++ }
 	return u, p
 }
 
-func TestCheckedOffersNewRelease(t *testing.T) {
+func TestCheckedOffersNewReleaseAndAsks(t *testing.T) {
 	u, p := newProbeUpdater("v2.2.0")
-	rel := &update.Release{Version: "v2.3.0"}
+	rel := &update.Release{Version: "v2.3.0", Notes: "Changed\n• things"}
 	u.checked(rel, nil, false)
 	if u.available != rel {
 		t.Fatal("release not recorded")
@@ -39,8 +44,45 @@ func TestCheckedOffersNewRelease(t *testing.T) {
 	if len(p.notices) != 1 || p.notices[0] != "Update v2.3.0 is available." || !p.buttons[0] {
 		t.Fatalf("notices %v buttons %v", p.notices, p.buttons)
 	}
+	if len(p.asked) != 1 || p.asked[0] != "Changed\n• things" {
+		t.Fatalf("prompt: %v", p.asked)
+	}
+	if p.installed != 0 {
+		t.Error("a declined prompt started an install")
+	}
 	if len(p.alerts) != 0 {
 		t.Errorf("a scheduled check must not raise alerts: %v", p.alerts)
+	}
+}
+
+func TestYesToThePromptInstalls(t *testing.T) {
+	u, p := newProbeUpdater("v2.2.0")
+	p.answer = true
+	u.checked(&update.Release{Version: "v2.3.0"}, nil, false)
+	if p.installed != 1 {
+		t.Fatalf("install started %d times, want 1", p.installed)
+	}
+}
+
+func TestScheduledCheckAsksOncePerVersion(t *testing.T) {
+	u, p := newProbeUpdater("v2.2.0")
+	rel := &update.Release{Version: "v2.3.0"}
+	u.checked(rel, nil, false)
+	u.checked(rel, nil, false) // tomorrow's check, same release
+	if len(p.asked) != 1 {
+		t.Fatalf("asked %d times for one version, want 1", len(p.asked))
+	}
+	if len(p.notices) != 2 || !p.buttons[1] {
+		t.Errorf("the strip should still offer it: %v %v", p.notices, p.buttons)
+	}
+	u.checked(&update.Release{Version: "v2.4.0"}, nil, false)
+	if len(p.asked) != 2 {
+		t.Errorf("a newer version should be asked about: %d", len(p.asked))
+	}
+	// A manual check always asks, even for the declined version.
+	u.checked(rel, nil, true)
+	if len(p.asked) != 3 {
+		t.Errorf("manual check did not ask: %d", len(p.asked))
 	}
 }
 
@@ -78,8 +120,8 @@ func TestCheckedDoesNotDisturbAnInstallInProgress(t *testing.T) {
 	u.busy = true
 	u.checked(&update.Release{Version: "v2.3.0"}, nil, false)
 	u.checked(nil, nil, false)
-	if len(p.notices) != 0 {
-		t.Errorf("strip rewritten during an install: %v", p.notices)
+	if len(p.notices) != 0 || len(p.asked) != 0 {
+		t.Errorf("strip rewritten or prompt shown during an install: %v %v", p.notices, p.asked)
 	}
 }
 

@@ -58,6 +58,9 @@ type darwinGUI struct {
 	// does not echo programmatic writes back as edits, so this is belt and
 	// braces — but it keeps the two GUIs' logic identical.
 	syncing bool
+
+	// The display-arrangement picture that chooses the host side.
+	arranger *arranger
 }
 
 // gui is a singleton: the C layer holds no Go pointers, so the exported
@@ -80,6 +83,7 @@ func Run(cfg config.Config, version string) error {
 			app.refreshBanner()
 		},
 		showAlert,
+		askUpdate,
 		func() { C.ehbGuiTerminate() })
 	app.updater.setEnabled(cfg.CheckUpdates)
 
@@ -89,11 +93,6 @@ func Run(cfg config.Config, version string) error {
 	for _, choice := range SlaveResolutionChoices {
 		cValue := C.CString(choice)
 		C.ehbGuiAddResolution(cValue)
-		C.free(unsafe.Pointer(cValue))
-	}
-	for _, side := range HostSideChoices {
-		cValue := C.CString(side)
-		C.ehbGuiAddHostSide(cValue)
 		C.free(unsafe.Pointer(cValue))
 	}
 	for _, orientation := range OrientationChoices {
@@ -109,12 +108,18 @@ func Run(cfg config.Config, version string) error {
 	cHotkey := C.CString(values.ToggleHotkey)
 	cResolution := C.CString(values.Resolution)
 	C.ehbGuiSetForm(cHotkey, C.int(cfg.MoveRateHz), cBool(cfg.CaptureKeyboard),
-		cBool(cfg.AutoSwitch), cResolution, C.int(values.HostSideIndex))
+		cBool(cfg.AutoSwitch), cResolution)
 	C.free(unsafe.Pointer(cHotkey))
 	C.free(unsafe.Pointer(cResolution))
 	if index := OrientationIndexOf(values.Resolution); index >= 0 {
 		C.ehbGuiSetOrientation(C.int(index))
 	}
+
+	app.arranger = newArranger(cfg.HostSide, values.Resolution)
+	var width, height C.double
+	C.ehbGuiArrangeSize(&width, &height)
+	app.arranger.setCanvas(float64(width), float64(height))
+	app.refreshDisplays()
 
 	go app.consumeEvents()
 
@@ -162,6 +167,16 @@ func showAlert(title, message string, isError bool) {
 	C.ehbGuiShowAlert(cTitle, cMessage, cBool(isError))
 	C.free(unsafe.Pointer(cTitle))
 	C.free(unsafe.Pointer(cMessage))
+}
+
+func askUpdate(title, message, notes string) bool {
+	cTitle := C.CString(title)
+	cMessage := C.CString(message)
+	cNotes := C.CString(notes)
+	defer C.free(unsafe.Pointer(cTitle))
+	defer C.free(unsafe.Pointer(cMessage))
+	defer C.free(unsafe.Pointer(cNotes))
+	return C.ehbGuiAskUpdate(cTitle, cMessage, cNotes) != 0
 }
 
 func setBanner(message string, visible bool, buttons C.int, isError bool) {
@@ -306,6 +321,8 @@ func (g *darwinGUI) resolutionEdited(text string) {
 		C.ehbGuiSetOrientation(C.int(index))
 		g.syncing = false
 	}
+	g.arranger.setDevice(text)
+	g.pushArrangement()
 }
 
 // setResolution writes the field and moves the orientation popup to match.
@@ -318,6 +335,51 @@ func (g *darwinGUI) setResolution(value string) {
 		C.ehbGuiSetOrientation(C.int(index))
 	}
 	g.syncing = false
+	g.arranger.setDevice(value)
+	g.pushArrangement()
+}
+
+// refreshDisplays re-reads the monitors and redraws the picture. Called at
+// startup and whenever macOS reports the screen layout changed.
+func (g *darwinGUI) refreshDisplays() {
+	const maxDisplays = 32
+	buffer := make([]C.EhbDisplay, maxDisplays)
+	count := int(C.ehbGuiDisplays(&buffer[0], maxDisplays))
+	displays := make([]Display, 0, count)
+	for i := 0; i < count; i++ {
+		d := buffer[i]
+		displays = append(displays, Display{
+			Name:     C.GoString(&d.name[0]),
+			X:        float64(d.x),
+			Y:        float64(d.y),
+			W:        float64(d.w),
+			H:        float64(d.h),
+			WidthMM:  float64(d.widthMM),
+			HeightMM: float64(d.heightMM),
+			Primary:  d.primary != 0,
+		})
+	}
+	g.arranger.setDisplays(displays)
+	g.pushArrangement()
+}
+
+// pushArrangement hands the current frame to the view.
+func (g *darwinGUI) pushArrangement() {
+	frame := g.arranger.frameNow()
+	C.ehbGuiArrangeBegin(cBool(frame.Dragging))
+	for _, d := range frame.Displays {
+		cName := C.CString(d.Name)
+		C.ehbGuiArrangeAddDisplay(cRect(d.Rect), cName, cBool(d.Primary))
+		C.free(unsafe.Pointer(cName))
+	}
+	cLabel := C.CString(frame.Device.Name)
+	C.ehbGuiArrangeSetDevice(cRect(frame.Device.Rect), cLabel)
+	C.free(unsafe.Pointer(cLabel))
+	C.ehbGuiArrangeEnd()
+}
+
+func cRect(r rectF) C.EhbRect {
+	return C.EhbRect{x: C.double(r.X), y: C.double(r.Y), w: C.double(r.W), h: C.double(r.H)}
 }
 
 func (g *darwinGUI) readConfigFromForm() error {
@@ -326,7 +388,7 @@ func (g *darwinGUI) readConfigFromForm() error {
 		ToggleHotkey:    C.GoString(&form.hotkey[0]),
 		MoveRateHz:      strconv.Itoa(int(form.rateHz)),
 		Resolution:      C.GoString(&form.resolution[0]),
-		HostSideIndex:   int(form.hostSideIndex),
+		HostSideIndex:   g.arranger.sideIndex(),
 		CaptureKeyboard: form.captureKeyboard != 0,
 		AutoSwitch:      form.autoSwitch != 0,
 	}
@@ -432,6 +494,25 @@ func goGuiOrientationChanged(index C.int) { app.orientationChanged(int(index)) }
 
 //export goGuiResolutionEdited
 func goGuiResolutionEdited(text *C.char) { app.resolutionEdited(C.GoString(text)) }
+
+//export goGuiArrangeMouse
+func goGuiArrangeMouse(phase C.int, x, y C.double) {
+	px, py := float64(x), float64(y)
+	switch phase {
+	case 0:
+		if !app.arranger.beginDrag(px, py) {
+			return
+		}
+	case 1:
+		app.arranger.drag(px, py)
+	default:
+		app.arranger.endDrag(px, py)
+	}
+	app.pushArrangement()
+}
+
+//export goGuiDisplaysChanged
+func goGuiDisplaysChanged() { app.refreshDisplays() }
 
 //export goGuiStopClicked
 func goGuiStopClicked() {

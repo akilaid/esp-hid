@@ -117,7 +117,9 @@ func newFakeRelease(t *testing.T, tag string, withSums bool) *fakeRelease {
 			assets += `,{"name":"SHA256SUMS","browser_download_url":"` + fr.srv.URL + `/sums","size":90}`
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","html_url":"https://example.invalid/rel","assets":[` + assets + `]}`))
+		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","html_url":"https://example.invalid/rel",` +
+			`"body":"## Added\n\n- A **thing** ([#12](https://x/12))\n\n## What's Changed\n* Fix by @someone in https://x/pull/3\n",` +
+			`"assets":[` + assets + `]}`))
 	})
 	mux.HandleFunc("/pkg", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(fr.payload) })
 	mux.HandleFunc("/sums", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(fr.sums)) })
@@ -137,6 +139,9 @@ func TestCheckFindsNewerRelease(t *testing.T) {
 	}
 	if rel.URL != "https://example.invalid/rel" {
 		t.Errorf("URL = %q", rel.URL)
+	}
+	if want := "Added\n\n• A thing (#12)\n\nWhat's Changed\n• Fix"; rel.Notes != want {
+		t.Errorf("Notes = %q, want %q", rel.Notes, want)
 	}
 	win, err := checkFor(context.Background(), fr.srv.Client(), fr.srv.URL, "v2.2.0", "windows")
 	if err != nil || win.Package.Name != "esp-hid-bridge.exe" {
@@ -206,5 +211,16 @@ func TestDownloadWithoutSumsStillWorks(t *testing.T) {
 	}
 	if _, err := Download(context.Background(), fr.srv.Client(), rel, t.TempDir(), nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPlainNotes(t *testing.T) {
+	in := "## [2.4.0] — 2026-09-15\r\n\r\n### Changed\r\n\r\n- The dropdown is gone. See [the docs](https://x/y).\r\n  Continued line.\r\n- `code` and **bold**\r\n\r\n\r\n\r\n## What's Changed\r\n* Pick the device by @akilaid in https://github.com/akilaid/esp-hid/pull/15\r\n\r\n**Full Changelog**: https://github.com/akilaid/esp-hid/compare/v2.3.0...v2.4.0\r\n"
+	want := "[2.4.0] — 2026-09-15\n\nChanged\n\n• The dropdown is gone. See the docs.\n  Continued line.\n• code and bold\n\nWhat's Changed\n• Pick the device\n\nFull Changelog: https://github.com/akilaid/esp-hid/compare/v2.3.0...v2.4.0"
+	if got := PlainNotes(in); got != want {
+		t.Errorf("PlainNotes:\n got %q\nwant %q", got, want)
+	}
+	if got := PlainNotes(""); got != "" {
+		t.Errorf("empty body gave %q", got)
 	}
 }

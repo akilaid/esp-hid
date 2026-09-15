@@ -328,3 +328,18 @@ func TestDeviceMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceDensity(t *testing.T) {
+	if got := DeviceDensity("1206x2622"); got != 460 {
+		t.Errorf("known size: %d, want 460", got)
+	}
+	if got := DeviceDensity("2622x1206"); got != 460 {
+		t.Errorf("known size, landscape: %d, want 460", got)
+	}
+	if got := DeviceDensity("777x1555"); got != DefaultDeviceDPI {
+		t.Errorf("unknown size: %d, want the default %d", got, DefaultDeviceDPI)
+	}
+	if got := DeviceDensity("garbage"); got != DefaultDeviceDPI {
+		t.Errorf("unparsable: %d, want the default %d", got, DefaultDeviceDPI)
+	}
+}

@@ -120,13 +120,15 @@ you through granting.
 ## Updates
 
 The app checks GitHub Releases for a newer version shortly after launch and
-once a day after that, and says so in the window when it finds one. Nothing
-is installed until you click **Install and relaunch** (Windows: **Install
-and restart**): the package is downloaded, checked against the release's
-`SHA256SUMS`, swapped in for the running program, and the app relaunches.
-**Check for Updates…** in the app menu (Windows: Help menu) asks on demand;
-**Check for Updates Automatically** in the same menu, or `-check-updates=false`,
-turns the scheduled check off. Development builds never update.
+once a day after that. When it finds one it asks — the prompt shows that
+release's changelog — and only on **Install and Relaunch** does it download
+the package, check it against the release's `SHA256SUMS`, swap it in for the
+running program, and relaunch. **Later** keeps the offer in the window, with
+an install button, and the app does not ask again about that version until
+you click **Check for Updates…** (a button in the window, also in the app
+menu; Windows: the Help menu). **Check for Updates Automatically** in that
+menu, or `-check-updates=false`, turns the scheduled check off. Development
+builds never update.
 
 On macOS the app's own download carries no quarantine flag, so updates skip
 the Gatekeeper step a browser download needs, and the release build is

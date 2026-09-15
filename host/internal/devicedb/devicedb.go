@@ -31,12 +31,15 @@ var devicesTSV string
 var appleTSV string
 
 // Device is one row of the table. Width and Height are portrait: Width is
-// the short side.
+// the short side. DPI is the pixel density (an Android bucket such as 420,
+// or Apple's ppi), 0 when the export did not say; it sizes the device in the
+// arrangement picture and plays no part in switching.
 type Device struct {
 	Brand  string
 	Name   string
 	Width  int
 	Height int
+	DPI    int
 }
 
 // Resolution renders the size the way config.ParseResolution reads it.
@@ -87,10 +90,10 @@ func load() {
 	})
 }
 
-// parseTSV reads "brand\tname\twidth\theight" lines; blank lines and lines
-// starting with '#' are skipped. A malformed line is an error rather than a
-// silent skip: the files are checked in, so a bad line is a bug to fix, not
-// data to tolerate.
+// parseTSV reads "brand\tname\twidth\theight\tdpi" lines; blank lines and
+// lines starting with '#' are skipped. A malformed line is an error rather
+// than a silent skip: the files are checked in, so a bad line is a bug to
+// fix, not data to tolerate.
 func parseTSV(src string) ([]entry, error) {
 	var out []entry
 	for n, line := range strings.Split(src, "\n") {
@@ -99,15 +102,19 @@ func parseTSV(src string) ([]entry, error) {
 			continue
 		}
 		fields := strings.Split(line, "\t")
-		if len(fields) != 4 {
-			return nil, fmt.Errorf("line %d: want 4 tab-separated fields, got %d", n+1, len(fields))
+		if len(fields) != 5 {
+			return nil, fmt.Errorf("line %d: want 5 tab-separated fields, got %d", n+1, len(fields))
 		}
 		width, err1 := strconv.Atoi(fields[2])
 		height, err2 := strconv.Atoi(fields[3])
+		dpi, err3 := strconv.Atoi(fields[4])
 		if err1 != nil || err2 != nil || width <= 0 || height <= 0 {
 			return nil, fmt.Errorf("line %d: bad size %q x %q", n+1, fields[2], fields[3])
 		}
-		d := Device{Brand: fields[0], Name: fields[1], Width: width, Height: height}
+		if err3 != nil || dpi < 0 {
+			return nil, fmt.Errorf("line %d: bad density %q", n+1, fields[4])
+		}
+		d := Device{Brand: fields[0], Name: fields[1], Width: width, Height: height, DPI: dpi}
 		out = append(out, entry{
 			Device: d,
 			name:   strings.ToLower(d.Name),
@@ -177,6 +184,30 @@ func Search(query string, limit int) []Device {
 		}
 	}
 	return out
+}
+
+// DensityFor is the typical pixel density of a screen of this size: the
+// median DPI over every table entry with these dimensions, either way up.
+// It is what the arrangement picture uses for a resolution typed by hand or
+// restored from settings, where no particular device is known; 0 when no
+// entry has that size.
+func DensityFor(width, height int) int {
+	if width > height {
+		width, height = height, width
+	}
+	load()
+	var dpis []int
+	for i := range entries {
+		e := &entries[i]
+		if e.Width == width && e.Height == height && e.DPI > 0 {
+			dpis = append(dpis, e.DPI)
+		}
+	}
+	if len(dpis) == 0 {
+		return 0
+	}
+	sort.Ints(dpis)
+	return dpis[len(dpis)/2]
 }
 
 func containsAll(haystack string, tokens []string) bool {
