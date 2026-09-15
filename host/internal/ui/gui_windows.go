@@ -31,6 +31,7 @@ const (
 
 type gui struct {
 	cfg     config.Config
+	version string
 	runtime *bridge.Runtime
 	events  chan bridge.Event
 
@@ -82,8 +83,9 @@ type gui struct {
 // release tag, which the update check compares against; "dev" disables it.
 func Run(cfg config.Config, version string) error {
 	app := &gui{
-		cfg:    cfg,
-		events: make(chan bridge.Event, 256),
+		cfg:     cfg,
+		version: version,
+		events:  make(chan bridge.Event, 256),
 	}
 	app.runtime = bridge.New(app.events)
 
@@ -206,7 +208,6 @@ func (app *gui) build() error {
 						Children: []Widget{
 							PushButton{AssignTo: &app.startButton, Text: "Start", OnClicked: app.startBridge},
 							PushButton{AssignTo: &app.stopButton, Text: "Stop", Enabled: false, OnClicked: app.stopBridge},
-							PushButton{Text: "Check for updates…", OnClicked: func() { app.updater.checkNow() }},
 							HSpacer{},
 							PushButton{AssignTo: &app.forgetButton, Text: "Forget device", OnClicked: app.forgetDevice},
 							PushButton{AssignTo: &app.bondsButton, Text: "Clear device bonds", OnClicked: app.clearBonds},
@@ -301,6 +302,16 @@ func (app *gui) build() error {
 				},
 			},
 			VSpacer{},
+			// Footer: the running version, and the update check where it is
+			// easy to find without unbalancing the status group's buttons.
+			Composite{
+				Layout: HBox{MarginsZero: true},
+				Children: []Widget{
+					Label{Text: VersionText(app.version), TextColor: walk.RGB(0x6e, 0x6e, 0x6e)},
+					HSpacer{},
+					PushButton{Text: "Check for updates…", OnClicked: func() { app.updater.checkNow() }},
+				},
+			},
 		},
 	}
 	if err := window.Create(); err != nil {

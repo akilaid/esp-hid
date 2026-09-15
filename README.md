@@ -125,8 +125,8 @@ release's changelog — and only on **Install and Relaunch** does it download
 the package, check it against the release's `SHA256SUMS`, swap it in for the
 running program, and relaunch. **Later** keeps the offer in the window, with
 an install button, and the app does not ask again about that version until
-you click **Check for Updates…** (a button in the window, also in the app
-menu; Windows: the Help menu). **Check for Updates Automatically** in that
+you click **Check for Updates…** (in the window's footer beside the version,
+also in the app menu; Windows: the Help menu). **Check for Updates Automatically** in that
 menu, or `-check-updates=false`, turns the scheduled check off. Development
 builds never update.
 
