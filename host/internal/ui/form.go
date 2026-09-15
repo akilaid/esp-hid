@@ -274,6 +274,12 @@ func FirmwareText(hello protocol.Hello) string {
 		hello.FwMajor, hello.FwMinor, hello.FwPatch, hello.ProtoVersion)
 }
 
+// VersionText words the build's version for the window footer: a release
+// tag without its "v", or the bare build string for anything else.
+func VersionText(version string) string {
+	return "ESP HID Bridge " + strings.TrimPrefix(version, "v")
+}
+
 // IndexOf returns the position of value in values, or -1.
 func IndexOf(values []string, value string) int {
 	for i, v := range values {

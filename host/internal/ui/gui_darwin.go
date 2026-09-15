@@ -89,6 +89,9 @@ func Run(cfg config.Config, version string) error {
 
 	C.ehbGuiInit()
 	C.ehbGuiSetAutoUpdateChecked(cBool(cfg.CheckUpdates))
+	cVersion := C.CString(VersionText(version))
+	C.ehbGuiSetVersion(cVersion)
+	C.free(unsafe.Pointer(cVersion))
 
 	for _, choice := range SlaveResolutionChoices {
 		cValue := C.CString(choice)

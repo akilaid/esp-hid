@@ -100,6 +100,8 @@ enum { EHB_BANNER_NONE = 0, EHB_BANNER_PERMISSION = 1, EHB_BANNER_UPDATE = 2 };
 void ehbGuiSetBanner(const char *message, int visible, int buttons, int isError);
 // The check mark on the "Check for Updates Automatically" menu item.
 void ehbGuiSetAutoUpdateChecked(int checked);
+// The running version, shown in the window's footer beside Check for Updates.
+void ehbGuiSetVersion(const char *text);
 void ehbGuiShowAlert(const char *title, const char *message, int isError);
 // The update prompt: message plus the release notes in a scrolling box, with
 // "Install and Relaunch" and "Later". Returns 1 to install, 0 otherwise.

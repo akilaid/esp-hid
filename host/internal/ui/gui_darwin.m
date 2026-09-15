@@ -29,16 +29,21 @@ extern void goGuiDisplaysChanged(void);
 // settings form that never needs to resize and keeps this file free of
 // constraint plumbing.
 static const CGFloat kWindowWidth = 620;
-static const CGFloat kWindowHeight = 781;
+static const CGFloat kWindowHeight = 777;
 static const CGFloat kMargin = 20;
 static const CGFloat kRowHeight = 22;
 // The status box is tallest with the permission banner and its buttons on
 // top. Without them that strip is dead space, so the box and the window give
 // it up; every other frame is anchored to the bottom and stays put.
-static const CGFloat kStatusBoxHeight = 301;
+static const CGFloat kStatusBoxHeight = 265;
 static const CGFloat kBannerStripHeight = 65;
 // The arrangement picture inside the Device Layout box.
 static const CGFloat kArrangeHeight = 130;
+// The strip under the boxes: version on the left, Check for Updates on the
+// right. Everything else sits above it.
+static const CGFloat kFooterHeight = 32;
+static const CGFloat kFooterButtonY = 6;
+static const CGFloat kFooterButtonHeight = 26; // what makeButton uses
 
 @interface EHBController
     : NSObject <NSApplicationDelegate, NSWindowDelegate, NSComboBoxDelegate,
@@ -209,6 +214,7 @@ static NSButton *gGrantButton = nil;
 static NSButton *gSettingsButton = nil;
 static NSButton *gUpdateButton = nil;
 static NSMenuItem *gAutoUpdateItem = nil;
+static NSTextField *gVersionLabel = nil;
 
 static NSButton *gStartButton = nil;
 static NSButton *gStopButton = nil;
@@ -753,43 +759,44 @@ static void buildWindow(void) {
   NSView *root = [gWindow contentView];
 
   // --- Connection & Status -----------------------------------------------
-  NSBox *statusBox = makeBox(root, @"Connection & Status", 460, kStatusBoxHeight);
+  // Boxes stack from the footer up: Device Layout (280), Input Settings
+  // (130), Connection & Status (kStatusBoxHeight), 10-20 pt apart.
+  NSBox *statusBox = makeBox(root, @"Connection & Status", 460 + kFooterHeight, kStatusBoxHeight);
   gStatusBox = statusBox;
   NSView *sv = [statusBox contentView];
   CGFloat sw = NSWidth([sv bounds]);
 
-  gBanner = makeLabel(sv, @"", 0, 241, sw, YES);
+  gBanner = makeLabel(sv, @"", 0, 205, sw, YES);
   [gBanner setTextColor:[NSColor systemRedColor]];
   [gBanner setHidden:YES];
 
-  gGrantButton = makeButton(sv, @"Grant Permission…", 0, 211, 170,
+  gGrantButton = makeButton(sv, @"Grant Permission…", 0, 175, 170,
                             @selector(grantClicked:));
-  gSettingsButton = makeButton(sv, @"Open System Settings", 180, 211, 190,
+  gSettingsButton = makeButton(sv, @"Open System Settings", 180, 175, 190,
                                @selector(settingsClicked:));
   [gGrantButton setHidden:YES];
   [gSettingsButton setHidden:YES];
   // Shares the row with the permission buttons; only one set shows at once.
-  gUpdateButton = makeButton(sv, @"Install and relaunch", 0, 211, 170,
+  gUpdateButton = makeButton(sv, @"Install and relaunch", 0, 175, 170,
                              @selector(updateClicked:));
   [gUpdateButton setHidden:YES];
 
   const CGFloat labelWidth = 90;
   const CGFloat valueX = 100;
-  makeLabel(sv, @"Bridge:", 0, 176, labelWidth, NO);
-  gStatusBridge = makeValue(sv, @"Stopped", valueX, 176, sw - valueX);
-  makeLabel(sv, @"Device:", 0, 149, labelWidth, NO);
-  gStatusDevice = makeValue(sv, @"-", valueX, 149, sw - valueX);
-  makeLabel(sv, @"Firmware:", 0, 122, labelWidth, NO);
-  gStatusFirmware = makeValue(sv, @"-", valueX, 122, sw - valueX);
-  makeLabel(sv, @"Bluetooth:", 0, 95, labelWidth, NO);
-  gStatusBluetooth = makeValue(sv, @"-", valueX, 95, sw - valueX);
+  makeLabel(sv, @"Bridge:", 0, 140, labelWidth, NO);
+  gStatusBridge = makeValue(sv, @"Stopped", valueX, 140, sw - valueX);
+  makeLabel(sv, @"Device:", 0, 113, labelWidth, NO);
+  gStatusDevice = makeValue(sv, @"-", valueX, 113, sw - valueX);
+  makeLabel(sv, @"Firmware:", 0, 86, labelWidth, NO);
+  gStatusFirmware = makeValue(sv, @"-", valueX, 86, sw - valueX);
+  makeLabel(sv, @"Bluetooth:", 0, 59, labelWidth, NO);
+  gStatusBluetooth = makeValue(sv, @"-", valueX, 59, sw - valueX);
 
-  // Two rows of buttons: the bridge on the upper one, with the update check
-  // beside it where it can be found; device maintenance on the lower.
-  gStartButton = makeButton(sv, @"Start", 0, 52, 100, @selector(startClicked:));
-  gStopButton = makeButton(sv, @"Stop", 110, 52, 100, @selector(stopClicked:));
-  makeButton(sv, @"Check for Updates…", sw - 180, 52, 180,
-             @selector(checkUpdatesClicked:));
+  gStartButton = makeButton(sv, @"Start", 0, 16, 100, @selector(startClicked:));
+  gStopButton = makeButton(sv, @"Stop", 110, 16, 100, @selector(stopClicked:));
+  // Both device-maintenance actions share the row's right-hand side. Bonds is
+  // narrowed to 170 so "Forget device" clears the Stop button, which ends at
+  // x=210; the layout here is hand-placed absolute frames.
   gBondsButton = makeButton(sv, @"Clear device bonds", sw - 170, 16, 170,
                             @selector(bondsClicked:));
   gForgetButton = makeButton(sv, @"Forget device", sw - 330, 16, 150,
@@ -797,7 +804,7 @@ static void buildWindow(void) {
   [gStopButton setEnabled:NO];
 
   // --- Input Settings -----------------------------------------------------
-  NSBox *inputBox = makeBox(root, @"Input Settings", 320, 130);
+  NSBox *inputBox = makeBox(root, @"Input Settings", 320 + kFooterHeight, 130);
   NSView *iv = [inputBox contentView];
   CGFloat iw = NSWidth([iv bounds]);
 
@@ -830,7 +837,7 @@ static void buildWindow(void) {
   [iv addSubview:gModeControl];
 
   // --- Device Layout ------------------------------------------------------
-  NSBox *layoutBox = makeBox(root, @"Device Layout", 20, 280);
+  NSBox *layoutBox = makeBox(root, @"Device Layout", 20 + kFooterHeight, 280);
   NSView *lv = [layoutBox contentView];
   CGFloat lw = NSWidth([lv bounds]);
 
@@ -868,6 +875,16 @@ static void buildWindow(void) {
       initWithFrame:NSMakeRect(0, 36, lw, kArrangeHeight)];
   [gArrangeView setToolTip:@"Drag the device to the side of your displays it sits on."];
   [lv addSubview:gArrangeView];
+
+  // --- Footer --------------------------------------------------------------
+  // The label is sized to its text and centred on the button's midline in
+  // ehbGuiSetVersion; a fixed-height text field draws its text at the top,
+  // which left the version sitting visibly above the button.
+  gVersionLabel = makeLabel(root, @"", kMargin + 4, 6, 300, NO);
+  [gVersionLabel setFont:[NSFont systemFontOfSize:11]];
+  [gVersionLabel setTextColor:[NSColor secondaryLabelColor]];
+  makeButton(root, @"Check for Updates…", kWindowWidth - kMargin - 170, kFooterButtonY, 170,
+             @selector(checkUpdatesClicked:));
 
   // Text comes from Go (ui.ResolutionHint) so both GUIs say the same thing.
   gResolutionHint = makeLabel(lv, @"", 0, 8, lw, NO);
@@ -1132,6 +1149,15 @@ void ehbGuiSetBanner(const char *message, int visible, int buttons, int isError)
   [gSettingsButton setHidden:permission ? NO : YES];
   [gUpdateButton setHidden:update ? NO : YES];
   layoutBannerStrip(visible ? YES : NO);
+}
+
+void ehbGuiSetVersion(const char *text) {
+  [gVersionLabel setStringValue:[NSString stringWithUTF8String:text]];
+  [gVersionLabel sizeToFit];
+  NSRect frame = [gVersionLabel frame];
+  CGFloat buttonMidY = kFooterButtonY + kFooterButtonHeight / 2;
+  frame.origin.y = round(buttonMidY - NSHeight(frame) / 2);
+  [gVersionLabel setFrame:frame];
 }
 
 void ehbGuiSetAutoUpdateChecked(int checked) {
