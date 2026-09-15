@@ -8,6 +8,17 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.4.5] — 2026-09-15
+
+### Fixed
+
+- **Windows: the window, taskbar and tray showed the stock Windows icon.**
+  The app looked its icons up by two guessed resource ids; the tool that
+  embeds them numbers the manifest first and then every image, so id 1 was
+  the manifest and id 2 the app icon that had been taken for the
+  remote-mode one. The icons are now found by enumerating the executable's
+  icon groups, so they also survive a change of artwork.
+
 ## [2.4.4] — 2026-09-15
 
 ### Fixed
@@ -257,6 +268,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.4.5]: https://github.com/akilaid/esp-hid/compare/v2.4.4...v2.4.5
 [2.4.4]: https://github.com/akilaid/esp-hid/compare/v2.4.3...v2.4.4
 [2.4.3]: https://github.com/akilaid/esp-hid/compare/v2.4.2...v2.4.3
 [2.4.2]: https://github.com/akilaid/esp-hid/compare/v2.4.1...v2.4.2
