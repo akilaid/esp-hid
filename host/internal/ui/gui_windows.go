@@ -72,6 +72,13 @@ type gui struct {
 	// True while this code is writing to the device-layout controls, so the
 	// change events they raise are not mistaken for user edits and fed back.
 	syncing bool
+	// Set once the window and the arrangement model exist. walk attaches a
+	// widget's event handlers before it applies declarative properties such
+	// as CurrentIndex, so the resolution combo's handler fires while later
+	// widgets are still nil pointers; until this is true the handlers do
+	// nothing. Without it the app died at startup with no message — that
+	// was the Windows build from 2.2.0 to 2.4.2.
+	ready bool
 
 	trayIcon   *walk.NotifyIcon
 	iconApp    *walk.Icon
@@ -317,11 +324,12 @@ func (app *gui) build() error {
 	if err := window.Create(); err != nil {
 		return err
 	}
+	app.arranger = newArranger(app.cfg.HostSide, resValue)
+	app.arranger.setDisplays(hostDisplays())
+	app.ready = true
 	if resIndex < 0 {
 		app.resCombo.SetText(resValue)
 	}
-	app.arranger = newArranger(app.cfg.HostSide, resValue)
-	app.arranger.setDisplays(hostDisplays())
 	app.arrangeResized()
 	if app.cfg.AutoSwitch {
 		app.autoRadio.SetChecked(true)
@@ -389,7 +397,7 @@ func (app *gui) setupTray() {
 // CB_SETCURSEL would copy the row's text over what is being typed — the
 // user reaches the rows with Down or the mouse.
 func (app *gui) deviceSearchChanged() {
-	if app.syncing {
+	if !app.ready || app.syncing {
 		return
 	}
 	text := app.deviceCombo.Text()
@@ -417,7 +425,7 @@ func (app *gui) deviceSearchChanged() {
 }
 
 func (app *gui) deviceMatchSelected() {
-	if app.syncing {
+	if !app.ready || app.syncing {
 		return
 	}
 	i := app.deviceCombo.CurrentIndex()
@@ -428,7 +436,7 @@ func (app *gui) deviceMatchSelected() {
 }
 
 func (app *gui) orientationChanged() {
-	if app.syncing {
+	if !app.ready || app.syncing {
 		return
 	}
 	if flipped, ok := OrientResolution(app.resolutionText(), app.orientCombo.CurrentIndex()); ok {
@@ -437,7 +445,7 @@ func (app *gui) orientationChanged() {
 }
 
 func (app *gui) resolutionEdited() {
-	if app.syncing {
+	if !app.ready || app.syncing {
 		return
 	}
 	text := app.resolutionText()
@@ -476,7 +484,7 @@ func (app *gui) setResolution(value string) {
 // PaintPixels are both in native pixels) and re-reads the displays, which
 // is also how a monitor plugged in mid-session shows up.
 func (app *gui) arrangeResized() {
-	if app.arranger == nil || app.arrangeWidget == nil {
+	if !app.ready || app.arrangeWidget == nil {
 		return
 	}
 	bounds := app.arrangeWidget.ClientBoundsPixels()
@@ -490,6 +498,9 @@ func (app *gui) arrangeResized() {
 // GDI objects are made and disposed per paint; it runs on user action, not
 // per frame.
 func (app *gui) paintArrangement(canvas *walk.Canvas, _ walk.Rectangle) error {
+	if !app.ready {
+		return nil
+	}
 	bounds := app.arrangeWidget.ClientBoundsPixels()
 	frame := app.arranger.frameNow()
 	enabled := app.arrangeWidget.Enabled()
