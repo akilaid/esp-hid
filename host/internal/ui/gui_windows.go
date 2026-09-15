@@ -411,12 +411,25 @@ func (app *gui) deviceSearchChanged() {
 	_ = app.deviceCombo.SetModel(labels)
 	_ = app.deviceCombo.SetText(text)
 	app.deviceCombo.SetTextSelection(start, end)
+	app.syncing = false
+	// Drop the list open only once this event is over. Replacing the model
+	// asks walk for a layout pass, and inside an event handler walk defers
+	// that pass until the handler returns; re-laying the control out closes
+	// a dropdown that is already open, so a show issued here was undone a
+	// moment later and the user saw nothing. Posting the show behind the
+	// layout keeps it up. Skipped if the text has moved on by then.
 	show := uintptr(0)
 	if len(labels) > 0 {
 		show = 1
 	}
-	app.deviceCombo.SendMessage(win.CB_SHOWDROPDOWN, show, 0)
-	app.syncing = false
+	app.mw.Synchronize(func() {
+		if !app.ready || app.deviceCombo.Text() != text {
+			return
+		}
+		app.deviceCombo.SendMessage(win.CB_SHOWDROPDOWN, show, 0)
+		// Opening the list can disturb the edit selection; put the caret back.
+		app.deviceCombo.SetTextSelection(start, end)
+	})
 	// The best match fills the field as the user types, so the picker never
 	// shows a device whose size is not the one about to be saved.
 	if len(app.deviceMatches) > 0 {
