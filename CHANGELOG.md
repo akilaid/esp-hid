@@ -8,6 +8,18 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.4.3] — 2026-09-15
+
+### Fixed
+
+- **Windows: the app did not start**, and showed nothing — from 2.2.0 for
+  anyone whose device resolution was one of the presets, and from 2.4.0 for
+  everyone. The toolkit fires a control's change handler while it is still
+  building the window, before the controls that handler reaches for exist;
+  the handlers now stay inert until the window is complete. A panic at
+  startup is no longer silent either: it is written to `bridge.log` and
+  shown in a message box.
+
 ## [2.4.2] — 2026-09-15
 
 ### Changed
@@ -237,6 +249,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.4.3]: https://github.com/akilaid/esp-hid/compare/v2.4.2...v2.4.3
 [2.4.2]: https://github.com/akilaid/esp-hid/compare/v2.4.1...v2.4.2
 [2.4.1]: https://github.com/akilaid/esp-hid/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/akilaid/esp-hid/compare/v2.3.0...v2.4.0

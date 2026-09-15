@@ -3,6 +3,9 @@
 package main
 
 import (
+	"fmt"
+	"log"
+	"runtime/debug"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -24,7 +27,18 @@ func reportFatal(err error) {
 	messageBox.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(caption)), mbIconError)
 }
 
-func run(cfg config.Config) error {
+func run(cfg config.Config) (err error) {
+	// The GUI build has no console, so an unrecovered panic — walk runs its
+	// window callbacks on this goroutine, and a panic in one unwinds back
+	// here through the callback frames — would end the process with nothing
+	// on screen and nothing on disk. Make it an error instead: main logs it
+	// to bridge.log and reportFatal puts it in a message box.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("panic: %v\n%s", r, debug.Stack())
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
 	if cfg.CLIMode {
 		return runCLI(cfg)
 	}
