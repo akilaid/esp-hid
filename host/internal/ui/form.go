@@ -26,10 +26,30 @@ var SlaveResolutionChoices = []string{
 	"720x1280", "768x1366", "900x1600", "1080x1920", "1440x2560", "2160x3840",
 }
 
-// HostSideChoices lists which edge of the host's screen the slave sits on.
-// Order is load-bearing: the GUIs address these by index.
+// HostSideChoices is the persisted vocabulary for where the *host* sits
+// relative to the device — "left" means this computer is to the left of the
+// phone, so the crossing edge is the computer's right border. Order is
+// load-bearing: the GUIs address these by index.
 var HostSideChoices = []string{
 	config.HostSideLeft, config.HostSideRight, config.HostSideTop, config.HostSideBottom,
+}
+
+// OppositeSide converts between the two ways of naming the same layout: the
+// side the host is on (what is saved) and the side the device is on (what
+// the arrangement picture shows). A phone drawn to the left of the displays
+// puts the host on the right.
+func OppositeSide(side string) string {
+	switch side {
+	case config.HostSideLeft:
+		return config.HostSideRight
+	case config.HostSideRight:
+		return config.HostSideLeft
+	case config.HostSideTop:
+		return config.HostSideBottom
+	case config.HostSideBottom:
+		return config.HostSideTop
+	}
+	return side
 }
 
 // OrientationChoices is the Portrait/Landscape picker, addressed by index
@@ -60,6 +80,28 @@ type DeviceMatch struct {
 	Label      string
 	Name       string
 	Resolution string
+	DPI        int
+}
+
+// DefaultDeviceDPI stands in for a device whose density nothing knows: a
+// resolution typed by hand that matches no table entry. Phones cluster
+// around it; a tablet drawn with it comes out somewhat small, which is the
+// harmless direction to be wrong in.
+const DefaultDeviceDPI = 420
+
+// DeviceDensity is the pixel density the arrangement picture draws a
+// resolution at. Only the resolution is saved, so this is looked up from the
+// table each time rather than remembered from a pick — a relaunch then shows
+// the same size as the session that set it.
+func DeviceDensity(resolution string) int {
+	width, height, err := config.ParseResolution(resolution)
+	if err != nil {
+		return DefaultDeviceDPI
+	}
+	if dpi := devicedb.DensityFor(width, height); dpi > 0 {
+		return dpi
+	}
+	return DefaultDeviceDPI
 }
 
 // DeviceMatches runs the picker search. Empty input yields nothing, so the
@@ -72,6 +114,7 @@ func DeviceMatches(query string) []DeviceMatch {
 			Label:      d.Label(),
 			Name:       d.Brand + " " + d.Name,
 			Resolution: d.Resolution(),
+			DPI:        d.DPI,
 		})
 	}
 	return matches

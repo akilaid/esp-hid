@@ -136,14 +136,45 @@ func TestLabelAndResolution(t *testing.T) {
 }
 
 func TestParseTSVRejectsMalformedLines(t *testing.T) {
-	if _, err := parseTSV("Apple\tiPhone\t1170\n"); err == nil {
-		t.Error("three fields accepted")
+	if _, err := parseTSV("Apple\tiPhone\t1170\t2532\n"); err == nil {
+		t.Error("four fields accepted; the density column is required")
 	}
-	if _, err := parseTSV("Apple\tiPhone\tabc\t2532\n"); err == nil {
+	if _, err := parseTSV("Apple\tiPhone\tabc\t2532\t460\n"); err == nil {
 		t.Error("non-numeric width accepted")
 	}
-	got, err := parseTSV("# comment\n\nApple\tiPhone\t1170\t2532\r\n")
-	if err != nil || len(got) != 1 || got[0].Width != 1170 {
+	if _, err := parseTSV("Apple\tiPhone\t1170\t2532\tx\n"); err == nil {
+		t.Error("non-numeric density accepted")
+	}
+	got, err := parseTSV("# comment\n\nApple\tiPhone\t1170\t2532\t460\r\n")
+	if err != nil || len(got) != 1 || got[0].Width != 1170 || got[0].DPI != 460 {
 		t.Errorf("comment/blank/CRLF handling: %v, %+v", err, got)
+	}
+}
+
+func TestDensityFor(t *testing.T) {
+	// A size the table knows, either way up, and one it cannot.
+	portrait := DensityFor(1206, 2622)
+	landscape := DensityFor(2622, 1206)
+	if portrait != 460 || landscape != 460 {
+		t.Errorf("iPhone 16 Pro size: %d / %d, want 460", portrait, landscape)
+	}
+	if got := DensityFor(1440, 3120); got < 400 || got > 560 {
+		t.Errorf("1440x3120 median %d is not in the QHD+ phone range", got)
+	}
+	if got := DensityFor(123, 456); got != 0 {
+		t.Errorf("unknown size gave %d, want 0", got)
+	}
+}
+
+func TestKnownDensities(t *testing.T) {
+	for _, d := range Search("galaxy s24 ultra", 10) {
+		if d.Brand == "Samsung" && d.DPI != 450 {
+			t.Errorf("Galaxy S24 Ultra density %d, want 450 (from the export)", d.DPI)
+		}
+	}
+	for _, d := range All() {
+		if d.DPI < 0 || d.DPI > 1000 {
+			t.Errorf("%s: implausible density %d", d.Label(), d.DPI)
+		}
 	}
 }

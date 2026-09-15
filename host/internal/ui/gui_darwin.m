@@ -20,19 +20,25 @@ extern void goGuiResolutionEdited(char *text);
 extern void goGuiUpdateClicked(void);
 extern void goGuiCheckUpdatesClicked(void);
 extern void goGuiToggleAutoUpdatesClicked(void);
+// Arrangement picture: phase 0 = mouse down, 1 = drag, 2 = mouse up, in the
+// view's coordinates (y down).
+extern void goGuiArrangeMouse(int phase, double x, double y);
+extern void goGuiDisplaysChanged(void);
 
 // Fixed-size window: the layout is hand-placed, which is a fair trade for a
 // settings form that never needs to resize and keeps this file free of
 // constraint plumbing.
 static const CGFloat kWindowWidth = 620;
-static const CGFloat kWindowHeight = 635;
+static const CGFloat kWindowHeight = 781;
 static const CGFloat kMargin = 20;
 static const CGFloat kRowHeight = 22;
 // The status box is tallest with the permission banner and its buttons on
 // top. Without them that strip is dead space, so the box and the window give
 // it up; every other frame is anchored to the bottom and stays put.
-static const CGFloat kStatusBoxHeight = 265;
+static const CGFloat kStatusBoxHeight = 301;
 static const CGFloat kBannerStripHeight = 65;
+// The arrangement picture inside the Device Layout box.
+static const CGFloat kArrangeHeight = 130;
 
 @interface EHBController
     : NSObject <NSApplicationDelegate, NSWindowDelegate, NSComboBoxDelegate,
@@ -53,6 +59,137 @@ static const CGFloat kBannerStripHeight = 65;
   (void)event;
   return YES;
 }
+@end
+
+// The display-arrangement picture. Everything it shows arrives from Go
+// already laid out in this view's coordinates; it paints, tracks the mouse,
+// and hands the events straight back. Flipped so Go's y-down rectangles map
+// without conversion.
+@interface EHBArrangeView : NSView
+@property(nonatomic, strong) NSMutableArray<NSValue *> *displayRects;
+@property(nonatomic, strong) NSMutableArray<NSString *> *displayNames;
+@property(nonatomic, strong) NSMutableArray<NSNumber *> *displayPrimary;
+@property(nonatomic) NSRect deviceRect;
+@property(nonatomic, strong) NSString *deviceLabel;
+@property(nonatomic) BOOL dragging;
+@property(nonatomic) BOOL enabled;
+@end
+
+@implementation EHBArrangeView
+
+- (instancetype)initWithFrame:(NSRect)frame {
+  self = [super initWithFrame:frame];
+  if (self) {
+    _displayRects = [NSMutableArray array];
+    _displayNames = [NSMutableArray array];
+    _displayPrimary = [NSMutableArray array];
+    _deviceLabel = @"";
+    _enabled = YES;
+    [self setWantsLayer:YES];
+    [[self layer] setCornerRadius:8];
+    [[self layer] setMasksToBounds:YES];
+  }
+  return self;
+}
+
+- (BOOL)isFlipped {
+  return YES;
+}
+
+- (void)drawRect:(NSRect)dirty {
+  (void)dirty;
+  CGFloat alpha = self.enabled ? 1.0 : 0.4;
+
+  // Backdrop: a quiet well the desktop sits in.
+  [[[NSColor labelColor] colorWithAlphaComponent:0.06] setFill];
+  NSRectFill([self bounds]);
+
+  NSMutableParagraphStyle *centred = [[NSMutableParagraphStyle alloc] init];
+  [centred setAlignment:NSTextAlignmentCenter];
+  [centred setLineBreakMode:NSLineBreakByTruncatingTail];
+
+  for (NSUInteger i = 0; i < [self.displayRects count]; i++) {
+    NSRect r = [self.displayRects[i] rectValue];
+    BOOL primary = [self.displayPrimary[i] boolValue];
+    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(r, 0.5, 0.5)
+                                                         xRadius:3
+                                                         yRadius:3];
+    [[[NSColor controlAccentColor] colorWithAlphaComponent:0.55 * alpha] setFill];
+    [path fill];
+    [[[NSColor controlAccentColor] colorWithAlphaComponent:alpha] setStroke];
+    [path setLineWidth:1];
+    [path stroke];
+    if (primary && NSHeight(r) > 12) {
+      // The menu bar, the way System Settings marks the main display.
+      [[[NSColor whiteColor] colorWithAlphaComponent:0.75 * alpha] setFill];
+      NSRectFill(NSMakeRect(NSMinX(r) + 1, NSMinY(r) + 1, NSWidth(r) - 2, 3));
+    }
+    if (NSWidth(r) > 40 && NSHeight(r) > 20) {
+      NSDictionary *attrs = @{
+        NSFontAttributeName : [NSFont systemFontOfSize:10],
+        NSForegroundColorAttributeName : [[NSColor whiteColor] colorWithAlphaComponent:alpha],
+        NSParagraphStyleAttributeName : centred,
+      };
+      NSRect textRect = NSInsetRect(r, 4, 0);
+      textRect.origin.y = NSMidY(r) - 7;
+      textRect.size.height = 14;
+      [self.displayNames[i] drawInRect:textRect withAttributes:attrs];
+    }
+  }
+
+  NSRect d = self.deviceRect;
+  NSBezierPath *device = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(d, 0.5, 0.5)
+                                                         xRadius:3
+                                                         yRadius:3];
+  NSColor *tint = [NSColor systemOrangeColor];
+  [[tint colorWithAlphaComponent:(self.dragging ? 0.85 : 0.65) * alpha] setFill];
+  [device fill];
+  [[tint colorWithAlphaComponent:alpha] setStroke];
+  [device setLineWidth:self.dragging ? 2 : 1];
+  [device stroke];
+  if (NSWidth(d) > 44 && NSHeight(d) > 14) {
+    NSDictionary *attrs = @{
+      NSFontAttributeName : [NSFont systemFontOfSize:9],
+      NSForegroundColorAttributeName : [[NSColor whiteColor] colorWithAlphaComponent:alpha],
+      NSParagraphStyleAttributeName : centred,
+    };
+    NSRect textRect = NSInsetRect(d, 2, 0);
+    textRect.origin.y = NSMidY(d) - 6;
+    textRect.size.height = 12;
+    [self.deviceLabel drawInRect:textRect withAttributes:attrs];
+  }
+}
+
+- (void)resetCursorRects {
+  if (self.enabled && !NSIsEmptyRect(self.deviceRect)) {
+    [self addCursorRect:self.deviceRect cursor:[NSCursor openHandCursor]];
+  }
+}
+
+- (void)mouseDown:(NSEvent *)event {
+  if (!self.enabled) {
+    return;
+  }
+  NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+  goGuiArrangeMouse(0, p.x, p.y);
+}
+
+- (void)mouseDragged:(NSEvent *)event {
+  if (!self.enabled) {
+    return;
+  }
+  NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+  goGuiArrangeMouse(1, p.x, p.y);
+}
+
+- (void)mouseUp:(NSEvent *)event {
+  if (!self.enabled) {
+    return;
+  }
+  NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+  goGuiArrangeMouse(2, p.x, p.y);
+}
+
 @end
 
 static EHBController *gController = nil;
@@ -83,7 +220,7 @@ static NSTextField *gRateField = nil;
 static NSButton *gKeyboardCheck = nil;
 static NSSegmentedControl *gModeControl = nil;
 static NSComboBox *gResolutionCombo = nil;
-static NSPopUpButton *gHostSidePopup = nil;
+static EHBArrangeView *gArrangeView = nil;
 static NSSearchField *gDeviceSearch = nil;
 static NSPopUpButton *gOrientationPopup = nil;
 
@@ -254,6 +391,11 @@ static void acceptSuggestion(NSInteger row) {
 - (void)toggleAutoUpdatesClicked:(id)sender {
   (void)sender;
   goGuiToggleAutoUpdatesClicked();
+}
+
+- (void)screensChanged:(NSNotification *)note {
+  (void)note;
+  goGuiDisplaysChanged();
 }
 
 - (void)openWindow:(id)sender {
@@ -611,42 +753,43 @@ static void buildWindow(void) {
   NSView *root = [gWindow contentView];
 
   // --- Connection & Status -----------------------------------------------
-  NSBox *statusBox = makeBox(root, @"Connection & Status", 350, kStatusBoxHeight);
+  NSBox *statusBox = makeBox(root, @"Connection & Status", 460, kStatusBoxHeight);
   gStatusBox = statusBox;
   NSView *sv = [statusBox contentView];
   CGFloat sw = NSWidth([sv bounds]);
 
-  gBanner = makeLabel(sv, @"", 0, 205, sw, YES);
+  gBanner = makeLabel(sv, @"", 0, 241, sw, YES);
   [gBanner setTextColor:[NSColor systemRedColor]];
   [gBanner setHidden:YES];
 
-  gGrantButton = makeButton(sv, @"Grant Permission…", 0, 175, 170,
+  gGrantButton = makeButton(sv, @"Grant Permission…", 0, 211, 170,
                             @selector(grantClicked:));
-  gSettingsButton = makeButton(sv, @"Open System Settings", 180, 175, 190,
+  gSettingsButton = makeButton(sv, @"Open System Settings", 180, 211, 190,
                                @selector(settingsClicked:));
   [gGrantButton setHidden:YES];
   [gSettingsButton setHidden:YES];
   // Shares the row with the permission buttons; only one set shows at once.
-  gUpdateButton = makeButton(sv, @"Install and relaunch", 0, 175, 170,
+  gUpdateButton = makeButton(sv, @"Install and relaunch", 0, 211, 170,
                              @selector(updateClicked:));
   [gUpdateButton setHidden:YES];
 
   const CGFloat labelWidth = 90;
   const CGFloat valueX = 100;
-  makeLabel(sv, @"Bridge:", 0, 140, labelWidth, NO);
-  gStatusBridge = makeValue(sv, @"Stopped", valueX, 140, sw - valueX);
-  makeLabel(sv, @"Device:", 0, 113, labelWidth, NO);
-  gStatusDevice = makeValue(sv, @"-", valueX, 113, sw - valueX);
-  makeLabel(sv, @"Firmware:", 0, 86, labelWidth, NO);
-  gStatusFirmware = makeValue(sv, @"-", valueX, 86, sw - valueX);
-  makeLabel(sv, @"Bluetooth:", 0, 59, labelWidth, NO);
-  gStatusBluetooth = makeValue(sv, @"-", valueX, 59, sw - valueX);
+  makeLabel(sv, @"Bridge:", 0, 176, labelWidth, NO);
+  gStatusBridge = makeValue(sv, @"Stopped", valueX, 176, sw - valueX);
+  makeLabel(sv, @"Device:", 0, 149, labelWidth, NO);
+  gStatusDevice = makeValue(sv, @"-", valueX, 149, sw - valueX);
+  makeLabel(sv, @"Firmware:", 0, 122, labelWidth, NO);
+  gStatusFirmware = makeValue(sv, @"-", valueX, 122, sw - valueX);
+  makeLabel(sv, @"Bluetooth:", 0, 95, labelWidth, NO);
+  gStatusBluetooth = makeValue(sv, @"-", valueX, 95, sw - valueX);
 
-  gStartButton = makeButton(sv, @"Start", 0, 16, 100, @selector(startClicked:));
-  gStopButton = makeButton(sv, @"Stop", 110, 16, 100, @selector(stopClicked:));
-  // Both device-maintenance actions share the row's right-hand side. Bonds is
-  // narrowed to 170 so "Forget device" clears the Stop button, which ends at
-  // x=210; the layout here is hand-placed absolute frames.
+  // Two rows of buttons: the bridge on the upper one, with the update check
+  // beside it where it can be found; device maintenance on the lower.
+  gStartButton = makeButton(sv, @"Start", 0, 52, 100, @selector(startClicked:));
+  gStopButton = makeButton(sv, @"Stop", 110, 52, 100, @selector(stopClicked:));
+  makeButton(sv, @"Check for Updates…", sw - 180, 52, 180,
+             @selector(checkUpdatesClicked:));
   gBondsButton = makeButton(sv, @"Clear device bonds", sw - 170, 16, 170,
                             @selector(bondsClicked:));
   gForgetButton = makeButton(sv, @"Forget device", sw - 330, 16, 150,
@@ -654,7 +797,7 @@ static void buildWindow(void) {
   [gStopButton setEnabled:NO];
 
   // --- Input Settings -----------------------------------------------------
-  NSBox *inputBox = makeBox(root, @"Input Settings", 210, 130);
+  NSBox *inputBox = makeBox(root, @"Input Settings", 320, 130);
   NSView *iv = [inputBox contentView];
   CGFloat iw = NSWidth([iv bounds]);
 
@@ -687,15 +830,15 @@ static void buildWindow(void) {
   [iv addSubview:gModeControl];
 
   // --- Device Layout ------------------------------------------------------
-  NSBox *layoutBox = makeBox(root, @"Device Layout", 20, 170);
+  NSBox *layoutBox = makeBox(root, @"Device Layout", 20, 280);
   NSView *lv = [layoutBox contentView];
   CGFloat lw = NSWidth([lv bounds]);
 
   // Row 1: find the device by name. Matches drop down under the field as
   // the user types, and the best one fills the resolution straight away.
-  makeLabel(lv, @"Device:", 0, 110, 130, NO);
+  makeLabel(lv, @"Device:", 0, 212, 130, NO);
   gDeviceSearch = [[NSSearchField alloc]
-      initWithFrame:NSMakeRect(135, 108, lw - 135, 24)];
+      initWithFrame:NSMakeRect(135, 210, lw - 135, 24)];
   [gDeviceSearch setPlaceholderString:@"Phone or tablet name"];
   [gDeviceSearch setDelegate:gController];
   [gDeviceSearch setTarget:gController];
@@ -704,25 +847,27 @@ static void buildWindow(void) {
 
   // Row 2: the resolution itself — what is actually saved — and its
   // orientation, which is just the same two numbers the other way round.
-  makeLabel(lv, @"Device resolution:", 0, 76, 130, NO);
+  makeLabel(lv, @"Device resolution:", 0, 178, 130, NO);
   gResolutionCombo = [[NSComboBox alloc]
-      initWithFrame:NSMakeRect(135, 74, 150, 24)];
+      initWithFrame:NSMakeRect(135, 176, 150, 24)];
   [gResolutionCombo setEditable:YES];
   [gResolutionCombo setDelegate:gController];
   [lv addSubview:gResolutionCombo];
 
-  makeLabel(lv, @"Orientation:", lw - 250, 76, 110, NO);
+  makeLabel(lv, @"Orientation:", lw - 250, 178, 110, NO);
   gOrientationPopup = [[NSPopUpButton alloc]
-      initWithFrame:NSMakeRect(lw - 135, 74, 135, 25)];
+      initWithFrame:NSMakeRect(lw - 135, 176, 135, 25)];
   [gOrientationPopup setTarget:gController];
   [gOrientationPopup setAction:@selector(orientationChanged:)];
   [lv addSubview:gOrientationPopup];
 
-  // Row 3.
-  makeLabel(lv, @"This Mac sits:", 0, 42, 130, NO);
-  gHostSidePopup = [[NSPopUpButton alloc]
-      initWithFrame:NSMakeRect(135, 40, 150, 25)];
-  [lv addSubview:gHostSidePopup];
+  // The arrangement: the desktop's displays as macOS has them arranged,
+  // and the device beside them on whichever side it sits. Dragging the
+  // device to another side is how the side is chosen.
+  gArrangeView = [[EHBArrangeView alloc]
+      initWithFrame:NSMakeRect(0, 36, lw, kArrangeHeight)];
+  [gArrangeView setToolTip:@"Drag the device to the side of your displays it sits on."];
+  [lv addSubview:gArrangeView];
 
   // Text comes from Go (ui.ResolutionHint) so both GUIs say the same thing.
   gResolutionHint = makeLabel(lv, @"", 0, 8, lw, NO);
@@ -745,6 +890,12 @@ void ehbGuiInit(void) {
   buildSuggestions();
   buildStatusItem();
 
+  [[NSNotificationCenter defaultCenter]
+      addObserver:gController
+         selector:@selector(screensChanged:)
+             name:NSApplicationDidChangeScreenParametersNotification
+           object:nil];
+
   [NSTimer scheduledTimerWithTimeInterval:1.0
                                    target:gController
                                  selector:@selector(tick:)
@@ -762,10 +913,6 @@ void ehbGuiTerminate(void) { [NSApp terminate:nil]; }
 
 void ehbGuiAddResolution(const char *value) {
   [gResolutionCombo addItemWithObjectValue:[NSString stringWithUTF8String:value]];
-}
-
-void ehbGuiAddHostSide(const char *value) {
-  [gHostSidePopup addItemWithTitle:[NSString stringWithUTF8String:value]];
 }
 
 void ehbGuiAddOrientation(const char *value) {
@@ -803,16 +950,83 @@ void ehbGuiSetOrientation(int index) {
 }
 
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
-                   int autoSwitch, const char *resolution, int hostSideIndex) {
+                   int autoSwitch, const char *resolution) {
   [gHotkeyField setStringValue:[NSString stringWithUTF8String:hotkey]];
   [gRateField setStringValue:[NSString stringWithFormat:@"%d", rateHz]];
   [gKeyboardCheck setState:captureKeyboard ? NSControlStateValueOn
                                            : NSControlStateValueOff];
   [gModeControl setSelectedSegment:autoSwitch ? 0 : 1];
   [gResolutionCombo setStringValue:[NSString stringWithUTF8String:resolution]];
-  if (hostSideIndex >= 0 && hostSideIndex < [gHostSidePopup numberOfItems]) {
-    [gHostSidePopup selectItemAtIndex:hostSideIndex];
+}
+
+int ehbGuiDisplays(EhbDisplay *out, int max) {
+  CGDirectDisplayID ids[32];
+  uint32_t count = 0;
+  if (CGGetActiveDisplayList(32, ids, &count) != kCGErrorSuccess) {
+    return 0;
   }
+  CGDirectDisplayID main = CGMainDisplayID();
+  int written = 0;
+  for (uint32_t i = 0; i < count && written < max; i++) {
+    CGRect bounds = CGDisplayBounds(ids[i]);
+    if (bounds.size.width <= 0 || bounds.size.height <= 0) {
+      continue;
+    }
+    EhbDisplay *d = &out[written++];
+    memset(d, 0, sizeof(*d));
+    d->x = bounds.origin.x;
+    d->y = bounds.origin.y;
+    d->w = bounds.size.width;
+    d->h = bounds.size.height;
+    // From the EDID; 0 for displays that do not report one.
+    CGSize mm = CGDisplayScreenSize(ids[i]);
+    d->widthMM = mm.width;
+    d->heightMM = mm.height;
+    d->primary = (ids[i] == main) ? 1 : 0;
+    // The marketing name lives on NSScreen, matched by display id.
+    NSString *name = nil;
+    for (NSScreen *screen in [NSScreen screens]) {
+      NSNumber *number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
+      if (number && [number unsignedIntValue] == ids[i]) {
+        name = [screen localizedName];
+        break;
+      }
+    }
+    if ([name length] == 0) {
+      name = [NSString stringWithFormat:@"Display %d", written];
+    }
+    strncpy(d->name, [name UTF8String], sizeof(d->name) - 1);
+  }
+  return written;
+}
+
+void ehbGuiArrangeSize(double *width, double *height) {
+  NSRect bounds = [gArrangeView bounds];
+  *width = NSWidth(bounds);
+  *height = NSHeight(bounds);
+}
+
+void ehbGuiArrangeBegin(int dragging) {
+  [gArrangeView.displayRects removeAllObjects];
+  [gArrangeView.displayNames removeAllObjects];
+  [gArrangeView.displayPrimary removeAllObjects];
+  gArrangeView.dragging = dragging ? YES : NO;
+}
+
+void ehbGuiArrangeAddDisplay(EhbRect rect, const char *name, int primary) {
+  [gArrangeView.displayRects addObject:[NSValue valueWithRect:NSMakeRect(rect.x, rect.y, rect.w, rect.h)]];
+  [gArrangeView.displayNames addObject:[NSString stringWithUTF8String:name]];
+  [gArrangeView.displayPrimary addObject:@(primary ? YES : NO)];
+}
+
+void ehbGuiArrangeSetDevice(EhbRect rect, const char *label) {
+  gArrangeView.deviceRect = NSMakeRect(rect.x, rect.y, rect.w, rect.h);
+  gArrangeView.deviceLabel = [NSString stringWithUTF8String:label];
+}
+
+void ehbGuiArrangeEnd(void) {
+  [gArrangeView setNeedsDisplay:YES];
+  [[gArrangeView window] invalidateCursorRectsForView:gArrangeView];
 }
 
 EhbForm ehbGuiReadForm(void) {
@@ -825,7 +1039,6 @@ EhbForm ehbGuiReadForm(void) {
   form.rateHz = [gRateField intValue];
   form.captureKeyboard = ([gKeyboardCheck state] == NSControlStateValueOn) ? 1 : 0;
   form.autoSwitch = ([gModeControl selectedSegment] == 0) ? 1 : 0;
-  form.hostSideIndex = (int)[gHostSidePopup indexOfSelectedItem];
   return form;
 }
 
@@ -855,7 +1068,9 @@ void ehbGuiSetRunning(int running) {
   [gKeyboardCheck setEnabled:running ? NO : YES];
   [gModeControl setEnabled:running ? NO : YES];
   [gResolutionCombo setEnabled:running ? NO : YES];
-  [gHostSidePopup setEnabled:running ? NO : YES];
+  gArrangeView.enabled = running ? NO : YES;
+  [gArrangeView setNeedsDisplay:YES];
+  [[gArrangeView window] invalidateCursorRectsForView:gArrangeView];
   [gDeviceSearch setEnabled:running ? NO : YES];
   [gOrientationPopup setEnabled:running ? NO : YES];
   if (running) {
@@ -930,6 +1145,38 @@ void ehbGuiShowAlert(const char *title, const char *message, int isError) {
   [alert setAlertStyle:isError ? NSAlertStyleCritical : NSAlertStyleInformational];
   [alert addButtonWithTitle:@"OK"];
   [alert runModal];
+}
+
+int ehbGuiAskUpdate(const char *title, const char *message, const char *notes) {
+  NSAlert *alert = [[NSAlert alloc] init];
+  [alert setMessageText:[NSString stringWithUTF8String:title]];
+  [alert setInformativeText:[NSString stringWithUTF8String:message]];
+  [alert setAlertStyle:NSAlertStyleInformational];
+  [alert addButtonWithTitle:@"Install and Relaunch"];
+  [alert addButtonWithTitle:@"Later"];
+
+  // The release notes, read-only in a scrolling box so a long entry does not
+  // turn the alert into a tower.
+  NSString *text = [NSString stringWithUTF8String:notes];
+  if ([text length] > 0) {
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 440, 180)];
+    [scroll setHasVerticalScroller:YES];
+    [scroll setBorderType:NSBezelBorder];
+    NSTextView *view = [[NSTextView alloc]
+        initWithFrame:NSMakeRect(0, 0, [scroll contentSize].width, [scroll contentSize].height)];
+    [view setEditable:NO];
+    [view setSelectable:YES];
+    [view setFont:[NSFont systemFontOfSize:12]];
+    [view setTextContainerInset:NSMakeSize(6, 6)];
+    [view setString:text];
+    [view setVerticallyResizable:YES];
+    [view setHorizontallyResizable:NO];
+    [view setAutoresizingMask:NSViewWidthSizable];
+    [[view textContainer] setWidthTracksTextView:YES];
+    [scroll setDocumentView:view];
+    [alert setAccessoryView:scroll];
+  }
+  return [alert runModal] == NSAlertFirstButtonReturn ? 1 : 0;
 }
 
 void ehbGuiOpenPrivacySettings(const char *anchor) {

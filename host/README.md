@@ -114,8 +114,22 @@ decays if you stop pushing for half a second.
 accidental crossings happen, raise it; if a deliberate one feels like work,
 lower it.
 
-**Device resolution** and **This Mac sits** decide which border is the crossing
-point. Both matter even in Manual, since they also drive the automatic return.
+**Device resolution** and the **arrangement picture** decide which border is
+the crossing point. Both matter even in Manual, since they also drive the
+automatic return.
+
+The picture shows your displays as macOS has them arranged — every monitor,
+in place, with its name, the main one marked by its menu bar — and the device
+beside them on whichever side it sits. Drag the device to another side of the
+desktop to change it; it snaps into place. A phone drawn to the left of your
+displays means you cross over at the desktop's left-hand edge — with two
+monitors, the outer edge of whichever is furthest left. (What is saved is
+still `hostSide`, the value the old dropdown set: *this computer's* side
+relative to the device, so that same layout is stored as `right`. The
+picture and the setting are two ends of one relationship.) Sizes are to
+scale: monitors at the physical size they report, the device from its
+resolution and pixel density, so a phone looks like a phone lying next to a
+monitor.
 
 You do not have to know the resolution: type part of the phone or tablet's
 name in **Device** and the matches drop down under it, each with its size;

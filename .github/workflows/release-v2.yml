@@ -267,6 +267,31 @@ jobs:
     # must-have.
     if: ${{ always() && needs.build-windows.result == 'success' }}
     steps:
+      # Checkout comes first: it cleans the workspace, which would sweep up
+      # artifacts downloaded before it.
+      - uses: actions/checkout@v4
+      # The release body is this version's CHANGELOG section. The app shows
+      # it in its update prompt, so it is what the user reads before saying
+      # yes; GitHub's generated notes follow it. No entry means generated
+      # notes only, which is still a release.
+      - name: Release notes from CHANGELOG
+        id: notes
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          awk -v v="$version" '
+            $0 ~ ("^## \\[" v "\\]") { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ -s release-notes.md ]; then
+            echo "body_path=release-notes.md" >> "$GITHUB_OUTPUT"
+            cat release-notes.md
+          else
+            echo "::warning::No CHANGELOG entry for $version; the release body will be the generated notes only."
+          fi
+        env:
+          TAG: ${{ needs.meta.outputs.tag }}
       - name: Download artifacts
         # merge-multiple flattens every artifact into one directory, so the
         # filenames below must not collide.
@@ -289,6 +314,7 @@ jobs:
           tag_name: ${{ needs.meta.outputs.tag }}
           name: ${{ needs.meta.outputs.name }}
           target_commitish: ${{ github.sha }}
+          body_path: ${{ steps.notes.outputs.body_path }}
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: |

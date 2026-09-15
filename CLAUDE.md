@@ -244,6 +244,24 @@ started. `ui/updates.go` is the shared state machine both GUIs drive; it
 never installs without a click. Dev builds (`version` not a tag) never see
 updates — `update.ErrDevBuild`.
 
+### Display arrangement picture
+The host side is chosen by dragging the device in a picture of the desktop,
+not a dropdown. `internal/ui/arrange.go` (untagged, tested) is the model:
+displays in their OS geometry, the device sized from resolution ÷ density
+through the primary display's mm-per-unit, fitted to the canvas; drag and
+the drop→side rule live there too. The GUIs enumerate displays themselves
+(`ehbGuiDisplays` in `gui_darwin.m`, `hostDisplays` in `gui_windows.go`) —
+capture's enumeration is deliberately minimal and unexported — in the same
+coordinate spaces capture uses (CG global points / virtual-screen pixels,
+y down), adding names and physical size. The C and walk layers only draw
+`frameNow()` and forward mouse events; they decide nothing. What is saved
+is still just `HostSide` — and note the vocabulary: `HostSide` names where
+the **host** sits relative to the device (`left` = the Mac is left of the
+phone = cross on the Mac's *right* border), while the picture shows where
+the **device** sits. `arranger` speaks device-side and converts with
+`OppositeSide` in `newArranger`/`sideIndex`; a phone drawn on the left saves
+`right`. `TestPhoneOnTheLeftSavesHostOnTheRight` pins it.
+
 ### Config
 `internal/config` resolves defaults → `settings-v2.json` → CLI flags. Every
 persisted field is a pointer so a missing key keeps its default. Adding a

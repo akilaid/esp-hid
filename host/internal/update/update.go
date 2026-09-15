@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -60,7 +61,8 @@ type Asset struct {
 // package picked out.
 type Release struct {
 	Version string // the tag, e.g. "v2.3.0"
-	URL     string // the release page, for "what's new"
+	URL     string // the release page
+	Notes   string // the release body, plain text (see Notes)
 	Package Asset  // this platform's installable
 	Sums    *Asset // SHA256SUMS, nil when the release has none
 }
@@ -68,6 +70,7 @@ type Release struct {
 type release struct {
 	TagName    string  `json:"tag_name"`
 	HTMLURL    string  `json:"html_url"`
+	Body       string  `json:"body"`
 	Draft      bool    `json:"draft"`
 	Prerelease bool    `json:"prerelease"`
 	Assets     []Asset `json:"assets"`
@@ -117,7 +120,7 @@ func checkFor(ctx context.Context, client *http.Client, apiBase, current, goos s
 	if !ok {
 		return nil, fmt.Errorf("%s has no package for %s", latest.TagName, goos)
 	}
-	rel := &Release{Version: latest.TagName, URL: latest.HTMLURL, Package: pkg}
+	rel := &Release{Version: latest.TagName, URL: latest.HTMLURL, Notes: PlainNotes(latest.Body), Package: pkg}
 	for i := range latest.Assets {
 		if latest.Assets[i].Name == SumsAsset {
 			rel.Sums = &latest.Assets[i]
@@ -221,6 +224,53 @@ func Download(ctx context.Context, client *http.Client, rel *Release, dir string
 	ok = true
 	return path, nil
 }
+
+// PlainNotes turns a release body — the CHANGELOG section the release job
+// attaches, followed by GitHub's generated notes — into text a dialog can
+// show: headings lose their hashes, bullets become bullets, links keep their
+// text, emphasis markers go, and the "by @user in <pull URL>" tails of the
+// generated list are dropped. It is deliberately a light touch, not a
+// Markdown renderer.
+func PlainNotes(body string) string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimRight(line, " ")
+		trimmed := strings.TrimLeft(line, " ")
+		switch {
+		case strings.HasPrefix(trimmed, "#"):
+			line = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+		case strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* "):
+			indent := line[:len(line)-len(trimmed)]
+			line = indent + "• " + trimmed[2:]
+		}
+		line = mdLink.ReplaceAllString(line, "$1")
+		line = mdByLine.ReplaceAllString(line, "")
+		line = strings.ReplaceAll(line, "**", "")
+		line = strings.ReplaceAll(line, "`", "")
+		out = append(out, line)
+	}
+	// Collapse runs of blank lines and trim the ends.
+	var kept []string
+	blank := true
+	for _, line := range out {
+		if strings.TrimSpace(line) == "" {
+			if !blank {
+				kept = append(kept, "")
+			}
+			blank = true
+			continue
+		}
+		kept = append(kept, line)
+		blank = false
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+var (
+	mdLink   = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
+	mdByLine = regexp.MustCompile(` by @\S+ in \S+$`)
+)
 
 func fetch(ctx context.Context, client *http.Client, url string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

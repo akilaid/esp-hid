@@ -11,11 +11,14 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	//lint:ignore ST1001 walk's declarative DSL is designed for dot import
 	. "github.com/lxn/walk/declarative"
 	"github.com/lxn/win"
+	"golang.org/x/sys/windows"
 
 	"esp-hid/host/internal/bridge"
 	"esp-hid/host/internal/config"
@@ -46,9 +49,14 @@ type gui struct {
 	autoRadio     *walk.RadioButton
 	manualRadio   *walk.RadioButton
 	resCombo      *walk.ComboBox
-	sideCombo     *walk.ComboBox
 	deviceCombo   *walk.ComboBox
 	orientCombo   *walk.ComboBox
+
+	// The display-arrangement picture that chooses the host side. Untested
+	// on real Windows so far: it only draws arranger's frame and forwards
+	// mouse events, with the model itself covered by arrange_test.go.
+	arrangeWidget *walk.CustomWidget
+	arranger      *arranger
 
 	// The update notice row in the status group, hidden until a newer
 	// release is found; walk gives a hidden widget no space.
@@ -92,6 +100,19 @@ func Run(cfg config.Config, version string) error {
 			}
 			walk.MsgBox(app.mw, title, message, style)
 		},
+		func(title, message, notes string) bool {
+			// A message box is the plain tool for this; the notes ride along
+			// under the question, cut short if a release is very talkative.
+			const maxNotes = 1500
+			if len(notes) > maxNotes {
+				notes = notes[:maxNotes] + "…"
+			}
+			text := message + "\n\nInstall it now and restart? (No keeps the offer in the window.)"
+			if notes != "" {
+				text += "\n\n" + notes
+			}
+			return walk.MsgBox(app.mw, title, text, walk.MsgBoxYesNo|walk.MsgBoxIconInformation) == walk.DlgCmdYes
+		},
 		func() {
 			app.exiting = true
 			app.mw.Close()
@@ -120,7 +141,6 @@ func Run(cfg config.Config, version string) error {
 }
 
 func (app *gui) build() error {
-	sideIndex := IndexOf(HostSideChoices, app.cfg.HostSide)
 	resValue := fmt.Sprintf("%dx%d", app.cfg.SlaveWidth, app.cfg.SlaveHeight)
 	resIndex := IndexOf(SlaveResolutionChoices, resValue)
 	orientIndex := OrientationIndexOf(resValue)
@@ -186,6 +206,7 @@ func (app *gui) build() error {
 						Children: []Widget{
 							PushButton{AssignTo: &app.startButton, Text: "Start", OnClicked: app.startBridge},
 							PushButton{AssignTo: &app.stopButton, Text: "Stop", Enabled: false, OnClicked: app.stopBridge},
+							PushButton{Text: "Check for updates…", OnClicked: func() { app.updater.checkNow() }},
 							HSpacer{},
 							PushButton{AssignTo: &app.forgetButton, Text: "Forget device", OnClicked: app.forgetDevice},
 							PushButton{AssignTo: &app.bondsButton, Text: "Clear device bonds", OnClicked: app.clearBonds},
@@ -245,11 +266,32 @@ func (app *gui) build() error {
 						CurrentIndex:          orientIndex,
 						OnCurrentIndexChanged: app.orientationChanged,
 					},
-					Label{Text: "This PC sits:"},
-					ComboBox{
-						AssignTo:     &app.sideCombo,
-						Model:        HostSideChoices,
-						CurrentIndex: sideIndex,
+					CustomWidget{
+						AssignTo:            &app.arrangeWidget,
+						ColumnSpan:          4,
+						MinSize:             Size{Height: 130},
+						ToolTipText:         "Drag the device to the side of your displays it sits on.",
+						PaintPixels:         app.paintArrangement,
+						PaintMode:           PaintBuffered,
+						InvalidatesOnResize: true,
+						OnSizeChanged:       app.arrangeResized,
+						OnMouseDown: func(x, y int, button walk.MouseButton) {
+							if button == walk.LeftButton && app.arranger.beginDrag(float64(x), float64(y)) {
+								app.arrangeWidget.Invalidate()
+							}
+						},
+						OnMouseMove: func(x, y int, button walk.MouseButton) {
+							if button&walk.LeftButton != 0 {
+								app.arranger.drag(float64(x), float64(y))
+								app.arrangeWidget.Invalidate()
+							}
+						},
+						OnMouseUp: func(x, y int, button walk.MouseButton) {
+							if button == walk.LeftButton {
+								app.arranger.endDrag(float64(x), float64(y))
+								app.arrangeWidget.Invalidate()
+							}
+						},
 					},
 					Label{
 						Text:       ResolutionHint,
@@ -267,6 +309,9 @@ func (app *gui) build() error {
 	if resIndex < 0 {
 		app.resCombo.SetText(resValue)
 	}
+	app.arranger = newArranger(app.cfg.HostSide, resValue)
+	app.arranger.setDisplays(hostDisplays())
+	app.arrangeResized()
 	if app.cfg.AutoSwitch {
 		app.autoRadio.SetChecked(true)
 	} else {
@@ -384,11 +429,14 @@ func (app *gui) resolutionEdited() {
 	if app.syncing {
 		return
 	}
-	if index := OrientationIndexOf(app.resolutionText()); index >= 0 {
+	text := app.resolutionText()
+	if index := OrientationIndexOf(text); index >= 0 {
 		app.syncing = true
 		_ = app.orientCombo.SetCurrentIndex(index)
 		app.syncing = false
 	}
+	app.arranger.setDevice(text)
+	app.arrangeWidget.Invalidate()
 }
 
 // resolutionText is the field's value as of the current event. When a preset
@@ -409,6 +457,138 @@ func (app *gui) setResolution(value string) {
 		_ = app.orientCombo.SetCurrentIndex(index)
 	}
 	app.syncing = false
+	app.arranger.setDevice(value)
+	app.arrangeWidget.Invalidate()
+}
+
+// arrangeResized gives the model the widget's pixel size (mouse events and
+// PaintPixels are both in native pixels) and re-reads the displays, which
+// is also how a monitor plugged in mid-session shows up.
+func (app *gui) arrangeResized() {
+	if app.arranger == nil || app.arrangeWidget == nil {
+		return
+	}
+	bounds := app.arrangeWidget.ClientBoundsPixels()
+	app.arranger.setDisplays(hostDisplays())
+	app.arranger.setCanvas(float64(bounds.Width), float64(bounds.Height))
+	app.arrangeWidget.Invalidate()
+}
+
+// paintArrangement draws arranger's frame: a well, the displays in blue with
+// their names (the primary with a menu-bar stripe), the device in orange.
+// GDI objects are made and disposed per paint; it runs on user action, not
+// per frame.
+func (app *gui) paintArrangement(canvas *walk.Canvas, _ walk.Rectangle) error {
+	bounds := app.arrangeWidget.ClientBoundsPixels()
+	frame := app.arranger.frameNow()
+	enabled := app.arrangeWidget.Enabled()
+
+	fill := func(color walk.Color, r rectF, rounded bool) {
+		brush, err := walk.NewSolidColorBrush(color)
+		if err != nil {
+			return
+		}
+		defer brush.Dispose()
+		rect := walk.Rectangle{X: int(r.X), Y: int(r.Y), Width: int(r.W + 0.5), Height: int(r.H + 0.5)}
+		if rounded {
+			_ = canvas.FillRoundedRectanglePixels(brush, rect, walk.Size{Width: 6, Height: 6})
+		} else {
+			_ = canvas.FillRectanglePixels(brush, rect)
+		}
+	}
+	outline := func(color walk.Color, r rectF) {
+		pen, err := walk.NewCosmeticPen(walk.PenSolid, color)
+		if err != nil {
+			return
+		}
+		defer pen.Dispose()
+		rect := walk.Rectangle{X: int(r.X), Y: int(r.Y), Width: int(r.W + 0.5), Height: int(r.H + 0.5)}
+		_ = canvas.DrawRoundedRectanglePixels(pen, rect, walk.Size{Width: 6, Height: 6})
+	}
+	label := func(text string, color walk.Color, r rectF) {
+		if r.W < 44 || r.H < 16 {
+			return
+		}
+		rect := walk.Rectangle{X: int(r.X) + 2, Y: int(r.Y), Width: int(r.W) - 4, Height: int(r.H)}
+		_ = canvas.DrawTextPixels(text, app.arrangeWidget.Font(), color, rect,
+			walk.TextCenter|walk.TextVCenter|walk.TextSingleLine|walk.TextEndEllipsis)
+	}
+	// Muted when disabled (the bridge is running and the settings are locked).
+	mix := func(c walk.Color) walk.Color {
+		if enabled {
+			return c
+		}
+		r, g, b := byte(c), byte(c>>8), byte(c>>16)
+		return walk.RGB((r+0xf0)/2, (g+0xf0)/2, (b+0xf0)/2)
+	}
+
+	fill(walk.RGB(0xf0, 0xf0, 0xf0), rectF{X: 0, Y: 0, W: float64(bounds.Width), H: float64(bounds.Height)}, false)
+	for _, d := range frame.Displays {
+		fill(mix(walk.RGB(0x4a, 0x90, 0xd9)), d.Rect, true)
+		outline(mix(walk.RGB(0x2b, 0x6c, 0xb0)), d.Rect)
+		if d.Primary && d.Rect.H > 12 {
+			fill(mix(walk.RGB(0xff, 0xff, 0xff)), rectF{X: d.Rect.X + 1, Y: d.Rect.Y + 1, W: d.Rect.W - 2, H: 3}, false)
+		}
+		label(d.Name, mix(walk.RGB(0xff, 0xff, 0xff)), d.Rect)
+	}
+	device := frame.Device.Rect
+	fill(mix(walk.RGB(0xf0, 0x8a, 0x24)), device, true)
+	outline(mix(walk.RGB(0xc2, 0x66, 0x0e)), device)
+	label(frame.Device.Name, mix(walk.RGB(0xff, 0xff, 0xff)), device)
+	return nil
+}
+
+// monitorInfoEx is MONITORINFOEXW: lxn/win's MONITORINFO plus the device
+// name, which GetMonitorInfoW fills when cbSize says there is room for it.
+type monitorInfoEx struct {
+	win.MONITORINFO
+	Device [win.CCHDEVICENAME]uint16
+}
+
+var (
+	guiUser32              = windows.NewLazySystemDLL("user32.dll")
+	procGuiEnumDisplayMons = guiUser32.NewProc("EnumDisplayMonitors")
+	procGuiGetMonitorInfoW = guiUser32.NewProc("GetMonitorInfoW")
+)
+
+// hostDisplays enumerates the monitors in virtual-screen pixels, y down —
+// the space the capture layer's EnumDisplayMonitors rects live in — with
+// the primary flag, the device name (\\.\DISPLAY1 without the prefix), and
+// the physical size GetDeviceCaps reports for the device, which is 0 when
+// the driver does not know.
+func hostDisplays() []Display {
+	var displays []Display
+	callback := windows.NewCallback(func(hMonitor uintptr, _ uintptr, _ *win.RECT, _ uintptr) uintptr {
+		var info monitorInfoEx
+		info.CbSize = uint32(unsafe.Sizeof(info))
+		if ok, _, _ := procGuiGetMonitorInfoW.Call(hMonitor, uintptr(unsafe.Pointer(&info))); ok == 0 {
+			return 1
+		}
+		rc := info.RcMonitor
+		if rc.Right <= rc.Left || rc.Bottom <= rc.Top {
+			return 1
+		}
+		device := windows.UTF16ToString(info.Device[:])
+		d := Display{
+			Name:    strings.TrimPrefix(device, `\\.\`),
+			X:       float64(rc.Left),
+			Y:       float64(rc.Top),
+			W:       float64(rc.Right - rc.Left),
+			H:       float64(rc.Bottom - rc.Top),
+			Primary: info.DwFlags&win.MONITORINFOF_PRIMARY != 0,
+		}
+		if name, err := windows.UTF16PtrFromString(device); err == nil {
+			if hdc := win.CreateDC(name, name, nil, nil); hdc != 0 {
+				d.WidthMM = float64(win.GetDeviceCaps(hdc, win.HORZSIZE))
+				d.HeightMM = float64(win.GetDeviceCaps(hdc, win.VERTSIZE))
+				win.DeleteDC(hdc)
+			}
+		}
+		displays = append(displays, d)
+		return 1
+	})
+	procGuiEnumDisplayMons.Call(0, 0, callback, 0)
+	return displays
 }
 
 // showUpdate is the updater's notice callback: text in the status group
@@ -432,7 +612,7 @@ func (app *gui) readConfigFromForm() error {
 		ToggleHotkey:    app.hotkeyEdit.Text(),
 		MoveRateHz:      app.rateEdit.Text(),
 		Resolution:      app.resCombo.Text(),
-		HostSideIndex:   app.sideCombo.CurrentIndex(),
+		HostSideIndex:   app.arranger.sideIndex(),
 		CaptureKeyboard: app.keyboardCheck.Checked(),
 		AutoSwitch:      app.autoRadio.Checked(),
 	}
@@ -505,7 +685,8 @@ func (app *gui) setRunning(running bool) {
 	app.autoRadio.SetEnabled(!running)
 	app.manualRadio.SetEnabled(!running)
 	app.resCombo.SetEnabled(!running)
-	app.sideCombo.SetEnabled(!running)
+	app.arrangeWidget.SetEnabled(!running)
+	app.arrangeWidget.Invalidate()
 	app.deviceCombo.SetEnabled(!running)
 	app.orientCombo.SetEnabled(!running)
 }

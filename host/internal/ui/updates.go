@@ -20,9 +20,14 @@ const (
 	updateCheckInterval   = 24 * time.Hour
 )
 
-// updater is the update flow both GUIs share: check, offer, download,
-// install. The platform supplies four callbacks; everything else — when to
+// updater is the update flow both GUIs share: check, ask, download,
+// install. The platform supplies five callbacks; everything else — when to
 // check, what to say, what to do on failure — lives here, tested once.
+//
+// Nothing is ever installed unasked. A newer release is put to the user in
+// a dialog that carries its release notes; a no leaves the offer in the
+// update strip for later. The startup and daily checks ask once per version;
+// "Check for Updates…" asks every time, since the user just requested it.
 //
 // State is touched only on the GUI thread. Network work runs on goroutines
 // and reports back through onMain, the same way device events do.
@@ -37,20 +42,30 @@ type updater struct {
 	// installable; empty text clears it.
 	notify func(text string, installable bool)
 	alert  func(title, message string, isError bool)
+	// ask puts a release to the user — title, a one-line message, the
+	// release notes — and reports whether they chose to install.
+	ask func(title, message, notes string) bool
 	// quit ends the app once the new version is in place and set to relaunch.
 	quit func()
+	// installNow is install, indirected so tests can see the decision
+	// without a download starting.
+	installNow func()
 
 	// Read by the schedule goroutine, written by the GUI when the setting
 	// changes, so it is atomic rather than a Config field.
 	enabled atomic.Bool
 
 	available *update.Release
-	busy      bool
-	stop      chan struct{}
+	// The version the scheduled check last asked about, so it does not ask
+	// again tomorrow for a release the user already declined.
+	offered string
+	busy    bool
+	stop    chan struct{}
 }
 
 func newUpdater(version string, onMain func(func()),
-	notify func(string, bool), alert func(string, string, bool), quit func()) *updater {
+	notify func(string, bool), alert func(string, string, bool),
+	ask func(string, string, string) bool, quit func()) *updater {
 	apiBase := update.APIBase
 	// Test hook: a local server standing in for GitHub, so the whole flow —
 	// notice, download, verify, swap, relaunch — can be exercised against a
@@ -58,16 +73,19 @@ func newUpdater(version string, onMain func(func()),
 	if override := os.Getenv("ESP_HID_UPDATE_API"); override != "" {
 		apiBase = override
 	}
-	return &updater{
+	u := &updater{
 		version: version,
 		client:  &http.Client{Timeout: update.Timeout},
 		apiBase: apiBase,
 		onMain:  onMain,
 		notify:  notify,
 		alert:   alert,
+		ask:     ask,
 		quit:    quit,
 		stop:    make(chan struct{}),
 	}
+	u.installNow = u.install
+	return u
 }
 
 // setEnabled reflects the "check automatically" setting. The schedule keeps
@@ -140,8 +158,18 @@ func (u *updater) checked(rel *update.Release, err error, interactive bool) {
 		}
 	default:
 		u.available = rel
-		if !u.busy {
-			u.notify(availableText(rel), true)
+		if u.busy {
+			return
+		}
+		u.notify(availableText(rel), true)
+		if !interactive && u.offered == rel.Version {
+			return
+		}
+		u.offered = rel.Version
+		if u.ask("Update available",
+			"ESP HID Bridge "+rel.Version+" is available; you have "+u.version+".",
+			rel.Notes) {
+			u.installNow()
 		}
 	}
 }

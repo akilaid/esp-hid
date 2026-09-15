@@ -21,8 +21,21 @@ typedef struct {
   int rateHz;
   int captureKeyboard;
   int autoSwitch;
-  int hostSideIndex;
 } EhbForm;
+
+// One monitor for the arrangement picture: its place in the desktop's
+// global coordinate space (points, y down — the space CGDisplayBounds and
+// the capture layer use) and its physical size, 0 when unknown.
+typedef struct {
+  double x, y, w, h;
+  double widthMM, heightMM;
+  int primary;
+  char name[64];
+} EhbDisplay;
+
+typedef struct {
+  double x, y, w, h;
+} EhbRect;
 
 // --- Lifecycle -----------------------------------------------------------
 
@@ -36,11 +49,26 @@ void ehbGuiTerminate(void);
 // --- Populating the form -------------------------------------------------
 
 void ehbGuiAddResolution(const char *value);
-void ehbGuiAddHostSide(const char *value);
 void ehbGuiAddOrientation(const char *value);
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
-                   int autoSwitch, const char *resolution, int hostSideIndex);
+                   int autoSwitch, const char *resolution);
 EhbForm ehbGuiReadForm(void);
+
+// --- Display arrangement -------------------------------------------------
+//
+// The picture that replaced the "This Mac sits" popup. Go owns the model
+// (ui/arrange.go): it asks for the displays and the view's size, works out
+// every rectangle in the view's own coordinates (y down), and pushes them
+// between Begin and End. The view draws what it was given and reports mouse
+// events through goGuiArrangeMouse; it decides nothing.
+
+// Fills out with the active displays; returns the number written.
+int ehbGuiDisplays(EhbDisplay *out, int max);
+void ehbGuiArrangeSize(double *width, double *height);
+void ehbGuiArrangeBegin(int dragging);
+void ehbGuiArrangeAddDisplay(EhbRect rect, const char *name, int primary);
+void ehbGuiArrangeSetDevice(EhbRect rect, const char *label);
+void ehbGuiArrangeEnd(void);
 
 // The device picker and orientation toggle are helpers that write into the
 // resolution field; only the resolution is read back. Go owns the search and
@@ -73,6 +101,9 @@ void ehbGuiSetBanner(const char *message, int visible, int buttons, int isError)
 // The check mark on the "Check for Updates Automatically" menu item.
 void ehbGuiSetAutoUpdateChecked(int checked);
 void ehbGuiShowAlert(const char *title, const char *message, int isError);
+// The update prompt: message plus the release notes in a scrolling box, with
+// "Install and Relaunch" and "Later". Returns 1 to install, 0 otherwise.
+int ehbGuiAskUpdate(const char *title, const char *message, const char *notes);
 
 // anchor is a System Settings pane anchor, e.g. "Privacy_Accessibility".
 void ehbGuiOpenPrivacySettings(const char *anchor);
