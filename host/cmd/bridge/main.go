@@ -52,5 +52,9 @@ func setupFileLog() {
 	if err != nil {
 		return
 	}
-	log.SetOutput(io.MultiWriter(os.Stderr, file))
+	// The file goes first. MultiWriter stops at the first writer that fails,
+	// and in the Windows GUI build stderr is not a valid handle — with stderr
+	// first, every line failed there and the file stayed at zero bytes, which
+	// is how three broken Windows releases went by without a single log line.
+	log.SetOutput(io.MultiWriter(file, os.Stderr))
 }

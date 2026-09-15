@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/lxn/walk"
@@ -79,6 +80,8 @@ type gui struct {
 	// nothing. Without it the app died at startup with no message — that
 	// was the Windows build from 2.2.0 to 2.4.2.
 	ready bool
+	// The device box's text the last time the search ran, for the poller.
+	lastSearchText string
 
 	trayIcon   *walk.NotifyIcon
 	iconApp    *walk.Icon
@@ -128,6 +131,7 @@ func Run(cfg config.Config, version string) error {
 		})
 	app.updater.setEnabled(cfg.CheckUpdates)
 	app.updater.start()
+	app.startDeviceSearchPoller()
 	app.loadIcons()
 	app.setupTray()
 	defer func() {
@@ -455,6 +459,7 @@ func (app *gui) deviceSearchChanged() {
 		return
 	}
 	text := app.deviceCombo.Text()
+	app.lastSearchText = text
 	start, end := app.deviceCombo.TextSelection()
 	app.deviceMatches = DeviceMatches(text)
 	log.Printf("device search %q: %d matches", text, len(app.deviceMatches))
@@ -501,6 +506,39 @@ func (app *gui) deviceMatchSelected() {
 		return
 	}
 	app.setResolution(app.deviceMatches[i].Resolution)
+	// Picking a row puts its label in the box; that is not a new query.
+	app.lastSearchText = app.deviceCombo.Text()
+}
+
+// startDeviceSearchPoller re-runs the device search whenever the box's text
+// has changed, checked a few times a second on the GUI thread. The search is
+// also wired to the box's edit-change event, but on real Windows that event
+// has not been seen to reach the handler and the reason is still in the
+// logs' hands; polling keeps the search working regardless, and reading a
+// window's text seven times a second costs nothing worth measuring.
+func (app *gui) startDeviceSearchPoller() {
+	ticker := time.NewTicker(150 * time.Millisecond)
+	go func() {
+		defer ticker.Stop()
+		for range ticker.C {
+			if app.mw.IsDisposed() {
+				return
+			}
+			app.mw.Synchronize(app.pollDeviceSearch)
+		}
+	}()
+}
+
+func (app *gui) pollDeviceSearch() {
+	if !app.ready || app.syncing || app.deviceCombo.IsDisposed() {
+		return
+	}
+	text := app.deviceCombo.Text()
+	if text == app.lastSearchText {
+		return
+	}
+	log.Printf("device search (poll): text changed %q -> %q", app.lastSearchText, text)
+	app.deviceSearchChanged()
 }
 
 func (app *gui) orientationChanged() {
