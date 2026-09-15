@@ -8,6 +8,14 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.4.6] — 2026-09-15
+
+### Changed
+
+- Windows: the device search now records what it sees in `bridge.log` —
+  whether the device table loaded, and each keystroke's text and match
+  count — so a search that finds nothing can be diagnosed from the log.
+
 ## [2.4.5] — 2026-09-15
 
 ### Fixed
@@ -268,6 +276,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.4.6]: https://github.com/akilaid/esp-hid/compare/v2.4.5...v2.4.6
 [2.4.5]: https://github.com/akilaid/esp-hid/compare/v2.4.4...v2.4.5
 [2.4.4]: https://github.com/akilaid/esp-hid/compare/v2.4.3...v2.4.4
 [2.4.3]: https://github.com/akilaid/esp-hid/compare/v2.4.2...v2.4.3

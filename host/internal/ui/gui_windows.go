@@ -23,6 +23,7 @@ import (
 
 	"esp-hid/host/internal/bridge"
 	"esp-hid/host/internal/config"
+	"esp-hid/host/internal/devicedb"
 )
 
 // RT_GROUP_ICON, the resource type an icon is loaded by.
@@ -326,6 +327,11 @@ func (app *gui) build() error {
 	app.arranger = newArranger(app.cfg.HostSide, resValue)
 	app.arranger.setDisplays(hostDisplays())
 	app.ready = true
+	if err := devicedb.Err(); err != nil {
+		log.Printf("device table failed to load; the device search will find nothing: %v", err)
+	} else {
+		log.Printf("device table: %d devices", len(devicedb.All()))
+	}
 	if resIndex < 0 {
 		app.resCombo.SetText(resValue)
 	}
@@ -441,12 +447,17 @@ func (app *gui) setupTray() {
 // CB_SETCURSEL would copy the row's text over what is being typed — the
 // user reaches the rows with Down or the mouse.
 func (app *gui) deviceSearchChanged() {
+	// Logged because the Windows build cannot be run where it is written:
+	// the first report of the search doing nothing could not be told apart
+	// from the handler never firing. One line per keystroke, to bridge.log.
+	log.Printf("device search: text=%q ready=%v syncing=%v", app.deviceCombo.Text(), app.ready, app.syncing)
 	if !app.ready || app.syncing {
 		return
 	}
 	text := app.deviceCombo.Text()
 	start, end := app.deviceCombo.TextSelection()
 	app.deviceMatches = DeviceMatches(text)
+	log.Printf("device search %q: %d matches", text, len(app.deviceMatches))
 	labels := make([]string, len(app.deviceMatches))
 	for i, m := range app.deviceMatches {
 		labels[i] = m.Label
