@@ -29,7 +29,7 @@ extern void goGuiDisplaysChanged(void);
 // settings form that never needs to resize and keeps this file free of
 // constraint plumbing.
 static const CGFloat kWindowWidth = 620;
-static const CGFloat kWindowHeight = 777;
+static const CGFloat kWindowHeight = 857;
 static const CGFloat kMargin = 20;
 static const CGFloat kRowHeight = 22;
 // The status box is tallest with the permission banner and its buttons on
@@ -225,6 +225,9 @@ static NSTextField *gHotkeyField = nil;
 static NSTextField *gRateField = nil;
 static NSButton *gKeyboardCheck = nil;
 static NSSegmentedControl *gModeControl = nil;
+static NSButton *gAnyDisplayCheck = nil;
+static NSButton *gPushCheck = nil;
+static NSTextField *gPushForceField = nil;
 static NSComboBox *gResolutionCombo = nil;
 static EHBArrangeView *gArrangeView = nil;
 static NSSearchField *gDeviceSearch = nil;
@@ -357,6 +360,13 @@ static void acceptSuggestion(NSInteger row) {
 - (void)startClicked:(id)sender {
   (void)sender;
   goGuiStartClicked();
+}
+
+// The force only means something while pushing is on, so the field follows
+// the checkbox. Pure AppKit; nothing for Go to know until Start reads the form.
+- (void)edgePushToggled:(id)sender {
+  (void)sender;
+  [gPushForceField setEnabled:[gPushCheck state] == NSControlStateValueOn];
 }
 
 - (void)stopClicked:(id)sender {
@@ -760,8 +770,8 @@ static void buildWindow(void) {
 
   // --- Connection & Status -----------------------------------------------
   // Boxes stack from the footer up: Device Layout (280), Input Settings
-  // (130), Connection & Status (kStatusBoxHeight), 10-20 pt apart.
-  NSBox *statusBox = makeBox(root, @"Connection & Status", 460 + kFooterHeight, kStatusBoxHeight);
+  // (210), Connection & Status (kStatusBoxHeight), 10-20 pt apart.
+  NSBox *statusBox = makeBox(root, @"Connection & Status", 540 + kFooterHeight, kStatusBoxHeight);
   gStatusBox = statusBox;
   NSView *sv = [statusBox contentView];
   CGFloat sw = NSWidth([sv bounds]);
@@ -804,37 +814,66 @@ static void buildWindow(void) {
   [gStopButton setEnabled:NO];
 
   // --- Input Settings -----------------------------------------------------
-  NSBox *inputBox = makeBox(root, @"Input Settings", 320 + kFooterHeight, 130);
+  // Four rows, 40 pt apart.
+  NSBox *inputBox = makeBox(root, @"Input Settings", 320 + kFooterHeight, 210);
   NSView *iv = [inputBox contentView];
   CGFloat iw = NSWidth([iv bounds]);
 
-  makeLabel(iv, @"Toggle hotkey:", 0, 72, 110, NO);
-  gHotkeyField = makeField(iv, 115, 70, 150);
+  makeLabel(iv, @"Toggle hotkey:", 0, 152, 110, NO);
+  gHotkeyField = makeField(iv, 115, 150, 150);
   [gHotkeyField setToolTip:@"For example: F9, or Ctrl+Alt+F7"];
 
-  makeLabel(iv, @"Send rate (Hz):", iw - 250, 72, 110, NO);
-  gRateField = makeField(iv, iw - 135, 70, 70);
+  makeLabel(iv, @"Send rate (Hz):", iw - 250, 152, 110, NO);
+  gRateField = makeField(iv, iw - 135, 150, 70);
 
-  gKeyboardCheck = [[NSButton alloc] initWithFrame:NSMakeRect(0, 32, 200, 22)];
+  gKeyboardCheck = [[NSButton alloc] initWithFrame:NSMakeRect(0, 112, 200, 22)];
   [gKeyboardCheck setButtonType:NSButtonTypeSwitch];
   [gKeyboardCheck setTitle:@"Forward keyboard"];
   [iv addSubview:gKeyboardCheck];
 
-  makeLabel(iv, @"Switching:", iw - 250, 32, 110, NO);
+  makeLabel(iv, @"Switching:", iw - 250, 112, 110, NO);
   gModeControl = [[NSSegmentedControl alloc]
-      initWithFrame:NSMakeRect(iw - 135, 30, 135, 24)];
+      initWithFrame:NSMakeRect(iw - 135, 110, 135, 24)];
   [gModeControl setSegmentCount:2];
   [gModeControl setLabel:@"Auto" forSegment:0];
   [gModeControl setLabel:@"Manual" forSegment:1];
   [gModeControl setSegmentStyle:NSSegmentStyleRounded];
-  // Auto is deliberately not a light touch on macOS: a single-display Mac puts
-  // the Dock, the menu bar and every close button on the same borders, so the
-  // pointer has to be pushed against the edge rather than merely reach it.
   [gModeControl
-      setToolTip:@"Auto: push the pointer against the screen edge to switch. "
-                 @"Either way, push past the far edge of the device's screen "
-                 @"to come back."];
+      setToolTip:@"Auto: move the pointer to the screen edge facing the "
+                 @"device to switch. Either way, push past the far edge of "
+                 @"the device's screen to come back."];
   [iv addSubview:gModeControl];
+
+  // Which displays may cross. Off, only the display beside the device; a
+  // taller display's edge that sticks out past its neighbour is an outer
+  // edge too, but crossing from there surprises more people than it helps.
+  gAnyDisplayCheck = [[NSButton alloc] initWithFrame:NSMakeRect(0, 72, 300, 22)];
+  [gAnyDisplayCheck setButtonType:NSButtonTypeSwitch];
+  [gAnyDisplayCheck setTitle:@"Switch from any display's edge"];
+  [gAnyDisplayCheck
+      setToolTip:@"Off: only the display beside the device switches. "
+                 @"On: any display whose edge faces the device, including a "
+                 @"taller display's edge past a shorter neighbour."];
+  [iv addSubview:gAnyDisplayCheck];
+
+  // Pushing is the guard a single-display Mac needs: the Dock, the menu bar
+  // and every close button live on the same borders, so merely arriving
+  // should not cross. Off, reaching the edge crosses, as on Windows.
+  gPushCheck = [[NSButton alloc] initWithFrame:NSMakeRect(0, 32, 200, 22)];
+  [gPushCheck setButtonType:NSButtonTypeSwitch];
+  [gPushCheck setTitle:@"Push to switch"];
+  [gPushCheck
+      setToolTip:@"Keep pushing the pointer against the edge to switch, "
+                 @"instead of switching the moment it arrives. Useful on a "
+                 @"single display, where the Dock and menu bar share that edge."];
+  [gPushCheck setTarget:gController];
+  [gPushCheck setAction:@selector(edgePushToggled:)];
+  [iv addSubview:gPushCheck];
+
+  makeLabel(iv, @"Push force:", iw - 250, 32, 110, NO);
+  gPushForceField = makeField(iv, iw - 135, 30, 70);
+  [gPushForceField setToolTip:@"How hard to push before it switches (1-2000). "
+                              @"Lower is lighter; 200 is the built-in default."];
 
   // --- Device Layout ------------------------------------------------------
   NSBox *layoutBox = makeBox(root, @"Device Layout", 20 + kFooterHeight, 280);
@@ -967,12 +1006,19 @@ void ehbGuiSetOrientation(int index) {
 }
 
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
-                   int autoSwitch, const char *resolution) {
+                   int autoSwitch, int anyDisplay, int edgePush,
+                   int edgePushForce, const char *resolution) {
   [gHotkeyField setStringValue:[NSString stringWithUTF8String:hotkey]];
   [gRateField setStringValue:[NSString stringWithFormat:@"%d", rateHz]];
   [gKeyboardCheck setState:captureKeyboard ? NSControlStateValueOn
                                            : NSControlStateValueOff];
   [gModeControl setSelectedSegment:autoSwitch ? 0 : 1];
+  [gAnyDisplayCheck setState:anyDisplay ? NSControlStateValueOn
+                                        : NSControlStateValueOff];
+  [gPushCheck setState:edgePush ? NSControlStateValueOn : NSControlStateValueOff];
+  [gPushForceField setStringValue:[NSString stringWithFormat:@"%d", edgePushForce]];
+  // setState: does not fire the checkbox's action.
+  [gPushForceField setEnabled:edgePush ? YES : NO];
   [gResolutionCombo setStringValue:[NSString stringWithUTF8String:resolution]];
 }
 
@@ -1056,6 +1102,9 @@ EhbForm ehbGuiReadForm(void) {
   form.rateHz = [gRateField intValue];
   form.captureKeyboard = ([gKeyboardCheck state] == NSControlStateValueOn) ? 1 : 0;
   form.autoSwitch = ([gModeControl selectedSegment] == 0) ? 1 : 0;
+  form.anyDisplay = ([gAnyDisplayCheck state] == NSControlStateValueOn) ? 1 : 0;
+  form.edgePush = ([gPushCheck state] == NSControlStateValueOn) ? 1 : 0;
+  form.edgePushForce = [gPushForceField intValue];
   return form;
 }
 
@@ -1084,6 +1133,9 @@ void ehbGuiSetRunning(int running) {
   [gRateField setEnabled:running ? NO : YES];
   [gKeyboardCheck setEnabled:running ? NO : YES];
   [gModeControl setEnabled:running ? NO : YES];
+  [gAnyDisplayCheck setEnabled:running ? NO : YES];
+  [gPushCheck setEnabled:running ? NO : YES];
+  [gPushForceField setEnabled:(!running && [gPushCheck state] == NSControlStateValueOn) ? YES : NO];
   [gResolutionCombo setEnabled:running ? NO : YES];
   gArrangeView.enabled = running ? NO : YES;
   [gArrangeView setNeedsDisplay:YES];

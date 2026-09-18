@@ -19,6 +19,14 @@ const (
 	HostSideBottom = "bottom"
 )
 
+// Limits on the edge push force. It is a sum of hardware mouse deltas within
+// half a second; a single event carries at most ~80, so 2000 is already
+// beyond a human shove, and below 1 the setting would mean nothing.
+const (
+	MinEdgePushForce = 1
+	MaxEdgePushForce = 2000
+)
+
 // Config is the resolved runtime configuration.
 type Config struct {
 	PortOverride    string  // empty = auto-discover by USB VID/PID
@@ -35,6 +43,9 @@ type Config struct {
 	CaptureKeyboard bool
 	ToggleHotkey    string // e.g. "F9", "Ctrl+Alt+F9"
 	AutoSwitch      bool
+	EdgeAnyDisplay  bool // any display's outer edge crosses, not just the one beside the device
+	EdgePush        bool // push against the edge to cross rather than merely reach it (macOS)
+	EdgePushForce   int  // how hard, when EdgePush is on
 	CheckUpdates    bool // GUI may look for newer releases; installing is always a click
 	GUIMode         bool
 	CLIMode         bool // headless diagnostics mode
@@ -59,6 +70,7 @@ func Defaults() Config {
 		CaptureKeyboard: true,
 		ToggleHotkey:    "F9",
 		AutoSwitch:      true,
+		EdgePushForce:   200,
 		CheckUpdates:    true,
 		GUIMode:         true,
 	}
@@ -87,6 +99,12 @@ func Parse(args []string) (Config, error) {
 	keyboard := fs.Bool("keyboard", cfg.CaptureKeyboard, "capture and forward keyboard events")
 	toggle := fs.String("toggle", cfg.ToggleHotkey, "hotkey to toggle remote mode")
 	autoSwitch := fs.Bool("auto-switch", cfg.AutoSwitch, "jump to remote device when the cursor hits the screen edge")
+	edgeAnyDisplay := fs.Bool("edge-any-display", cfg.EdgeAnyDisplay,
+		"let any display's outer edge switch, not only the display beside the device")
+	edgePush := fs.Bool("edge-push", cfg.EdgePush,
+		"push the cursor against the edge to switch instead of merely reaching it (macOS)")
+	edgePushForce := fs.Int("edge-push-force", cfg.EdgePushForce,
+		fmt.Sprintf("how hard to push when -edge-push is on (%d..%d)", MinEdgePushForce, MaxEdgePushForce))
 	checkUpdates := fs.Bool("check-updates", cfg.CheckUpdates, "let the GUI check GitHub for a newer release (never installs by itself)")
 	gui := fs.Bool("gui", cfg.GUIMode, "run with GUI")
 	cli := fs.Bool("cli", false, "headless diagnostics mode (implies -gui=false)")
@@ -108,6 +126,9 @@ func Parse(args []string) (Config, error) {
 	cfg.CaptureKeyboard = *keyboard
 	cfg.ToggleHotkey = *toggle
 	cfg.AutoSwitch = *autoSwitch
+	cfg.EdgeAnyDisplay = *edgeAnyDisplay
+	cfg.EdgePush = *edgePush
+	cfg.EdgePushForce = *edgePushForce
 	cfg.CheckUpdates = *checkUpdates
 	cfg.GUIMode = *gui && !*cli
 	cfg.CLIMode = *cli
@@ -148,6 +169,9 @@ func (c Config) Validate() error {
 	if c.SlaveWidth < 320 || c.SlaveWidth > 10000 ||
 		c.SlaveHeight < 320 || c.SlaveHeight > 10000 {
 		return fmt.Errorf("slave resolution out of range (320..10000 per axis)")
+	}
+	if c.EdgePushForce < MinEdgePushForce || c.EdgePushForce > MaxEdgePushForce {
+		return fmt.Errorf("edge push force must be between %d and %d", MinEdgePushForce, MaxEdgePushForce)
 	}
 	return nil
 }

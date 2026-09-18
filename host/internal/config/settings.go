@@ -30,6 +30,9 @@ type persistedSettings struct {
 	CaptureKeyboard *bool    `json:"captureKeyboard,omitempty"`
 	ToggleHotkey    *string  `json:"toggleHotkeyName,omitempty"`
 	AutoSwitch      *bool    `json:"autoSwitch,omitempty"`
+	EdgeAnyDisplay  *bool    `json:"edgeAnyDisplay,omitempty"`
+	EdgePush        *bool    `json:"edgePush,omitempty"`
+	EdgePushForce   *int     `json:"edgePushForce,omitempty"`
 	CheckUpdates    *bool    `json:"checkUpdates,omitempty"`
 	GUIMode         *bool    `json:"guiMode,omitempty"`
 }
@@ -99,6 +102,15 @@ func (p persistedSettings) applyTo(cfg *Config) {
 	if p.AutoSwitch != nil {
 		cfg.AutoSwitch = *p.AutoSwitch
 	}
+	if p.EdgeAnyDisplay != nil {
+		cfg.EdgeAnyDisplay = *p.EdgeAnyDisplay
+	}
+	if p.EdgePush != nil {
+		cfg.EdgePush = *p.EdgePush
+	}
+	if p.EdgePushForce != nil && *p.EdgePushForce > 0 {
+		cfg.EdgePushForce = *p.EdgePushForce
+	}
 	if p.CheckUpdates != nil {
 		cfg.CheckUpdates = *p.CheckUpdates
 	}
@@ -133,6 +145,9 @@ func Save(cfg Config) error {
 		CaptureKeyboard: &cfg.CaptureKeyboard,
 		ToggleHotkey:    &cfg.ToggleHotkey,
 		AutoSwitch:      &cfg.AutoSwitch,
+		EdgeAnyDisplay:  &cfg.EdgeAnyDisplay,
+		EdgePush:        &cfg.EdgePush,
+		EdgePushForce:   &cfg.EdgePushForce,
 		CheckUpdates:    &cfg.CheckUpdates,
 		GUIMode:         &cfg.GUIMode,
 	}

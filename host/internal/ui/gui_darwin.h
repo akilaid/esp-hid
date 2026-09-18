@@ -21,6 +21,9 @@ typedef struct {
   int rateHz;
   int captureKeyboard;
   int autoSwitch;
+  int anyDisplay;
+  int edgePush;
+  int edgePushForce;
 } EhbForm;
 
 // One monitor for the arrangement picture: its place in the desktop's
@@ -51,7 +54,8 @@ void ehbGuiTerminate(void);
 void ehbGuiAddResolution(const char *value);
 void ehbGuiAddOrientation(const char *value);
 void ehbGuiSetForm(const char *hotkey, int rateHz, int captureKeyboard,
-                   int autoSwitch, const char *resolution);
+                   int autoSwitch, int anyDisplay, int edgePush,
+                   int edgePushForce, const char *resolution);
 EhbForm ehbGuiReadForm(void);
 
 // --- Display arrangement -------------------------------------------------

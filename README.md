@@ -94,12 +94,17 @@ you through granting.
 - **Auto** switching is the other way across, on both platforms: set
   **Switching** to Auto and the cursor crosses at the host-side edge of your
   desktop. Seams between multiple monitors never trigger it — only the true
-  outer boundary does.
+  outer boundary does, and only from the display that sits beside the
+  device. A taller display next to a shorter one exposes part of its own
+  border past the neighbour; that strip does not cross unless you turn on
+  **Switch from any display's edge** (`-edge-any-display`).
   - **On Windows**, reaching the edge crosses.
-  - **On macOS**, you have to *push against* the edge — keep moving outward
-    once the pointer is already stuck there. A single display puts the Dock,
-    the menu bar and every close button on those same borders, so merely
-    arriving must not be a crossing.
+  - **On macOS**, reaching the edge crosses too, unless **Push to switch**
+    (`-edge-push`) is on: then you have to keep moving outward once the
+    pointer is already stuck against the border, and **Push force**
+    (`-edge-push-force`) sets how much. Worth turning on with a single
+    display, which puts the Dock, the menu bar and every close button on
+    those same borders.
 - **Coming back** works by hotkey, by pushing the cursor against the far edge
   of the device's screen, or optionally by a deliberate left-swipe
   (`-leftreturn`). This is automatic on both platforms.
@@ -172,6 +177,13 @@ Both platforms accept the same flags.
 - `-auto-switch`: enter remote mode at the screen edge (default `true`). Both
   GUIs expose this as **Switching: Auto / Manual**, and the GUI's value wins
   when you press Start.
+- `-edge-any-display`: let any display whose edge faces the device switch,
+  not only the display beside it (default `false`).
+- `-edge-push`: on macOS, push the cursor against the edge to switch instead
+  of switching the moment it arrives (default `false`). Windows has no
+  motion to measure once the pointer is clamped and always crosses on contact.
+- `-edge-push-force`: how hard to push when `-edge-push` is on, `1`–`2000`
+  (default `200`). Lower is lighter.
 - `-gui`: launch the GUI (default `true`).
 - `-cli`: diagnostics only, no input capture (implies `-gui=false`).
 

@@ -48,6 +48,16 @@ type Options struct {
 	SlaveHeight     int
 	HostSide        string
 	AutoSwitch      bool
+	// EdgeAnyDisplay lets any display whose edge faces the device cross,
+	// including a taller display's strip past a shorter neighbour. Off, only
+	// the display(s) on the desktop's outer boundary on that side may cross.
+	EdgeAnyDisplay bool
+	// EdgePush requires the pointer to be pushed against the edge rather than
+	// merely reach it; EdgePushForce is how hard (0 = built-in default).
+	// macOS only: the Windows hook sees absolute positions and has no delta
+	// once the pointer is clamped, so Windows always crosses on contact.
+	EdgePush      bool
+	EdgePushForce int
 
 	// DebugStallCapture makes the first captured event sleep long enough for
 	// the OS to disable the tap/hook, so the recovery path can be exercised

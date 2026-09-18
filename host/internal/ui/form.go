@@ -176,6 +176,9 @@ type FormValues struct {
 	HostSideIndex   int
 	CaptureKeyboard bool
 	AutoSwitch      bool
+	EdgeAnyDisplay  bool
+	EdgePush        bool
+	EdgePushForce   string
 }
 
 // FormValuesFrom renders a config back into form fields, for populating the
@@ -188,6 +191,9 @@ func FormValuesFrom(cfg config.Config) FormValues {
 		HostSideIndex:   IndexOf(HostSideChoices, cfg.HostSide),
 		CaptureKeyboard: cfg.CaptureKeyboard,
 		AutoSwitch:      cfg.AutoSwitch,
+		EdgeAnyDisplay:  cfg.EdgeAnyDisplay,
+		EdgePush:        cfg.EdgePush,
+		EdgePushForce:   strconv.Itoa(cfg.EdgePushForce),
 	}
 }
 
@@ -208,6 +214,12 @@ func (f FormValues) Apply(cfg *config.Config) error {
 	}
 	updated.MoveRateHz = rate
 
+	force, err := strconv.Atoi(strings.TrimSpace(f.EdgePushForce))
+	if err != nil || force < config.MinEdgePushForce || force > config.MaxEdgePushForce {
+		return fmt.Errorf("push force must be a number between %d and %d", config.MinEdgePushForce, config.MaxEdgePushForce)
+	}
+	updated.EdgePushForce = force
+
 	width, height, err := config.ParseResolution(f.Resolution)
 	if err != nil {
 		return err
@@ -220,6 +232,8 @@ func (f FormValues) Apply(cfg *config.Config) error {
 	}
 	updated.CaptureKeyboard = f.CaptureKeyboard
 	updated.AutoSwitch = f.AutoSwitch
+	updated.EdgeAnyDisplay = f.EdgeAnyDisplay
+	updated.EdgePush = f.EdgePush
 
 	if err := updated.Validate(); err != nil {
 		return err

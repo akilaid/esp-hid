@@ -111,7 +111,8 @@ func Run(cfg config.Config, version string) error {
 	cHotkey := C.CString(values.ToggleHotkey)
 	cResolution := C.CString(values.Resolution)
 	C.ehbGuiSetForm(cHotkey, C.int(cfg.MoveRateHz), cBool(cfg.CaptureKeyboard),
-		cBool(cfg.AutoSwitch), cResolution)
+		cBool(cfg.AutoSwitch), cBool(cfg.EdgeAnyDisplay), cBool(cfg.EdgePush),
+		C.int(cfg.EdgePushForce), cResolution)
 	C.free(unsafe.Pointer(cHotkey))
 	C.free(unsafe.Pointer(cResolution))
 	if index := OrientationIndexOf(values.Resolution); index >= 0 {
@@ -394,6 +395,9 @@ func (g *darwinGUI) readConfigFromForm() error {
 		HostSideIndex:   g.arranger.sideIndex(),
 		CaptureKeyboard: form.captureKeyboard != 0,
 		AutoSwitch:      form.autoSwitch != 0,
+		EdgeAnyDisplay:  form.anyDisplay != 0,
+		EdgePush:        form.edgePush != 0,
+		EdgePushForce:   strconv.Itoa(int(form.edgePushForce)),
 	}
 	return values.Apply(&g.cfg)
 }

@@ -72,6 +72,15 @@ void ehbWarpCursor(double x, double y);
 // Decoupling the cursor from the hardware is what makes relative capture
 // work without warping on every event.
 void ehbSetMouseAssociation(int associated);
+// A warp starts an interval (0.25 s by default) during which hardware motion
+// does not move the pointer. That is the hesitation felt on returning to the
+// host: the exit warps the pointer to the edge and the next quarter second
+// of mouse movement goes nowhere. Re-associating straight after the warp is
+// the documented way to cut it short, but that call is honoured only for
+// the frontmost application, which the bridge normally is not. This sets
+// the interval for the whole window-server connection instead. The app
+// never posts events, so zero costs nothing. Call once at startup.
+void ehbSetLocalEventsSuppression(double seconds);
 // Idempotent, and display-count independent: CGDisplayHideCursor ignores its
 // display argument and keeps one hide count per window server connection.
 void ehbHideCursor(void);

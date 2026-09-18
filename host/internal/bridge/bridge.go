@@ -126,6 +126,9 @@ func (r *Runtime) Start(cfg config.Config) error {
 			SlaveHeight:       cfg.SlaveHeight,
 			HostSide:          cfg.HostSide,
 			AutoSwitch:        cfg.AutoSwitch,
+			EdgeAnyDisplay:    cfg.EdgeAnyDisplay,
+			EdgePush:          cfg.EdgePush,
+			EdgePushForce:     cfg.EdgePushForce,
 			DebugStallCapture: cfg.DebugStallCapture,
 		}
 		if err := capture.Run(ctx, opts, captureEvents, activationAllowed); err != nil {
