@@ -58,6 +58,9 @@ const (
 	// and leaving the pointer visible for the session. The relocation that
 	// unblocks it lands within a handful.
 	hideRetryLimit = 60
+	// How long motion is withheld after a relocation if the pointer never
+	// shows up at the target — the event was lost, so stop waiting for it.
+	relocateSettleLimit = 500 * time.Millisecond
 )
 
 // session holds every piece of mutable capture state. It is created before
@@ -88,8 +91,15 @@ type session struct {
 	// is retried on later events, once the relocation has taken.
 	hidePending bool
 	hideRetries int
-	edgeArmed   bool
-	hotkeyDown  bool
+	// A relocation has been posted and the pointer has not yet arrived at
+	// pinPoint from relocateOrigin. Motion is withheld until it has: the
+	// first hardware event at the new position reports the whole jump as
+	// its delta.
+	relocating       bool
+	relocateOrigin   point
+	relocateDeadline time.Time
+	edgeArmed        bool
+	hotkeyDown       bool
 	// remoteAnchor is the monitor centre, the key that re-finds the entry
 	// monitor on exit (and, on Windows, the pin point too). entryPoint is
 	// where the pointer actually crossed, so the return lands on that row or
@@ -353,6 +363,11 @@ func (s *session) handleMouseMove(event C.CGEventRef) C.CGEventRef {
 		return event
 	}
 
+	if s.settleRelocation(event) {
+		C.ehbWarpCursor(C.double(s.pinPoint.X), C.double(s.pinPoint.Y))
+		return C.ehbNullEvent()
+	}
+
 	// The cursor is decoupled from the mouse here, so the event's absolute
 	// location is meaningless; its deltas are the real motion.
 	dx := int(C.ehbEventDeltaX(event))
@@ -609,6 +624,7 @@ func (s *session) setRemoteMode(active bool, source string) {
 		s.reconcileModifiers(uint64(C.ehbCurrentFlags()), 0, false)
 	} else {
 		s.hidePending = false
+		s.relocating = false
 		if s.cursorHidden {
 			C.ehbShowCursor()
 			s.cursorHidden = false
@@ -652,11 +668,41 @@ func (s *session) hideLocalCursor() {
 	s.hidePending = true
 	s.hideRetries = 0
 	target := s.monitorCentre(s.pinPoint)
+	s.relocating = true
+	s.relocateOrigin = s.pinPoint
+	s.relocateDeadline = time.Now().Add(relocateSettleLimit)
 	s.pinPoint = target
 	log.Printf("capture: the Dock is holding the pointer; relocating it to %d,%d before hiding", target.X, target.Y)
 	// Posted off the tap thread: an active tap's callback is answering the
 	// window server, and posting is a message back to it.
 	go C.ehbPostRelocation(C.double(target.X), C.double(target.Y))
+}
+
+// settleRelocation withholds motion until the pointer has arrived at the
+// relocation target, and reports whether this event is still part of that.
+//
+// A posted move is not a warp. The HID system takes it as the pointer's new
+// position, and the first hardware event generated after that reports the
+// difference from the last one as its delta — the whole jump, measured:
+// dx=-74 dy=246 for a 75x249 relocation, on the first event located at the
+// target, with the events still in flight at the old position clean. From a
+// screen corner that jump points across the whole display, which for the
+// return-pressure model is a shove past the far edge of the device: remote
+// mode left again on the very next event, the exit warped the pointer back
+// to the edge, and the hand still pushing there re-entered — a visible
+// flicker between corner and centre, and no switch that stuck. So nothing
+// is forwarded, and nothing reaches the return model, until an event turns
+// up nearer the target than the origin; that event is the jump, and is the
+// last one dropped. A few pixels of real motion go with it.
+func (s *session) settleRelocation(event C.CGEventRef) bool {
+	if !s.relocating {
+		return false
+	}
+	location := s.eventPoint(event)
+	if closerTo(location, s.pinPoint, s.relocateOrigin) || time.Now().After(s.relocateDeadline) {
+		s.relocating = false
+	}
+	return true
 }
 
 // retryHide runs at the top of every event while a hide is pending. The
@@ -684,6 +730,7 @@ func (s *session) retryHide() {
 // crash would undo them anyway — but a clean exit must not rely on that.
 func (s *session) restoreCursor() {
 	s.hidePending = false
+	s.relocating = false
 	if s.cursorHidden {
 		C.ehbShowCursor()
 		s.cursorHidden = false

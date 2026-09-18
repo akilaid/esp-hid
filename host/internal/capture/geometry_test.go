@@ -21,6 +21,20 @@ var (
 	desktopTall = []monitorRect{monitorA, monitorTall}
 )
 
+func TestCloserTo(t *testing.T) {
+	corner := point{X: 0, Y: 1075}
+	centre := point{X: 960, Y: 540}
+	if !closerTo(point{X: 960, Y: 537}, centre, corner) {
+		t.Error("a point beside the centre should be closer to it")
+	}
+	if closerTo(point{X: 1, Y: 1074}, centre, corner) {
+		t.Error("a point beside the corner should not be closer to the centre")
+	}
+	if closerTo(centre, centre, centre) {
+		t.Error("equal distances are not closer")
+	}
+}
+
 func TestUnionOfMonitorRects(t *testing.T) {
 	if _, ok := unionOfMonitorRects(nil); ok {
 		t.Error("no monitors should report no union")

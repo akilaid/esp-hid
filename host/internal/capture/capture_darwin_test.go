@@ -100,6 +100,13 @@ func TestIntegrationF19Toggle(t *testing.T) {
 // with a real event and retries the hide; this asks the window server, not
 // the session, whether the pointer ended up hidden.
 //
+// The relocation is a posted move, and the first hardware event after one
+// reports the whole jump as its delta (measured). From the corner that is a
+// shove across the display, which the return-pressure model reads as a push
+// past the device's far edge; remote mode used to leave on that event and
+// the hand still at the edge re-entered, over and over. The test plays that
+// event the way hardware would and requires remote mode to hold.
+//
 // With the Dock on another side or hidden, the corner is ordinary and the
 // hide takes at once — the test then passes trivially.
 func TestIntegrationHideSurvivesTheDock(t *testing.T) {
@@ -129,17 +136,36 @@ func TestIntegrationHideSurvivesTheDock(t *testing.T) {
 
 	// A real event in the bottom-left corner: the Dock strip on a default
 	// desktop, and where the report came from.
-	_, height := mainDisplaySize()
-	syntheticMouseMoveTo(4, height-4, -2)
+	width, height := mainDisplaySize()
+	corner := point{X: 4, Y: int32(height) - 4}
+	syntheticMouseMoveTo(float64(corner.X), float64(corner.Y), -2)
 	time.Sleep(150 * time.Millisecond)
 
 	syntheticKey(testKeyF9, true)
 	syntheticKey(testKeyF9, false)
 
-	// The retries ride on events; keep some coming, as a hand would.
+	// If the hide was refused, the pointer is on its way to the centre. Wait
+	// for it to land, then do what hardware does next: one event at the new
+	// position whose delta is the jump — here +900 in x, a push past the
+	// device's far edge for a host on the right.
+	centre := point{X: int32(width / 2), Y: int32(height / 2)}
+	arrived := false
+	for i := 0; i < 20 && !arrived; i++ {
+		time.Sleep(25 * time.Millisecond)
+		p, _ := currentCursorPoint()
+		arrived = closerTo(p, centre, corner)
+	}
+	at := corner
+	if arrived {
+		at = centre
+	}
+	syntheticMouseMoveTo(float64(at.X), float64(at.Y), 900)
+
+	// The retries ride on events; keep some coming, as a hand would, from
+	// where the pointer now sits.
 	hidden := false
 	for i := 0; i < 20 && !hidden; i++ {
-		syntheticMouseMove(1, 0)
+		syntheticMouseMoveTo(float64(at.X), float64(at.Y), 1)
 		time.Sleep(50 * time.Millisecond)
 		hidden = !cursorVisible()
 	}
@@ -160,14 +186,22 @@ func TestIntegrationHideSurvivesTheDock(t *testing.T) {
 	}
 	close(events)
 
-	entered := false
+	entries, bounced := 0, false
 	for event := range events {
-		if event.Kind == EventRemoteMode && event.Active {
-			entered = true
+		if event.Kind != EventRemoteMode {
+			continue
+		}
+		if event.Active {
+			entries++
+		} else if event.Source == "slave_edge" {
+			bounced = true
 		}
 	}
-	if !entered {
+	if entries == 0 {
 		t.Fatal("the hotkey did not enter remote mode")
+	}
+	if bounced || entries > 1 {
+		t.Errorf("remote mode bounced: %d entries, slave-edge exit %v — the relocation jump reached the return model", entries, bounced)
 	}
 	if !hidden {
 		t.Error("the local pointer was still visible a second after entering remote mode beside the Dock")
