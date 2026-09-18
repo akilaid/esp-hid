@@ -135,45 +135,61 @@ func TestIntegrationHideSurvivesTheDock(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// A real event in the bottom-left corner: the Dock strip on a default
-	// desktop, and where the report came from.
+	// desktop, and where the report came from. Twice over in one session:
+	// a hide count that leaks on the first round is what keeps the pointer
+	// hidden after the second exit, and that is what the GUI cannot recover
+	// from.
 	width, height := mainDisplaySize()
 	corner := point{X: 4, Y: int32(height) - 4}
-	syntheticMouseMoveTo(float64(corner.X), float64(corner.Y), -2)
-	time.Sleep(150 * time.Millisecond)
-
-	syntheticKey(testKeyF9, true)
-	syntheticKey(testKeyF9, false)
-
-	// If the hide was refused, the pointer is on its way to the centre. Wait
-	// for it to land, then do what hardware does next: one event at the new
-	// position whose delta is the jump — here +900 in x, a push past the
-	// device's far edge for a host on the right.
 	centre := point{X: int32(width / 2), Y: int32(height / 2)}
-	arrived := false
-	for i := 0; i < 20 && !arrived; i++ {
-		time.Sleep(25 * time.Millisecond)
-		p, _ := currentCursorPoint()
-		arrived = closerTo(p, centre, corner)
-	}
-	at := corner
-	if arrived {
-		at = centre
-	}
-	syntheticMouseMoveTo(float64(at.X), float64(at.Y), 900)
+	const rounds = 2
+	hidden := make([]bool, rounds)
+	restored := make([]bool, rounds)
+	for round := 0; round < rounds; round++ {
+		// Motion outside the strip first, so the Dock is tracking afresh
+		// each round rather than still from the last.
+		syntheticMouseMoveTo(float64(centre.X), float64(centre.Y), 2)
+		time.Sleep(100 * time.Millisecond)
+		syntheticMouseMoveTo(float64(corner.X), float64(corner.Y), -2)
+		time.Sleep(150 * time.Millisecond)
 
-	// The retries ride on events; keep some coming, as a hand would, from
-	// where the pointer now sits.
-	hidden := false
-	for i := 0; i < 20 && !hidden; i++ {
-		syntheticMouseMoveTo(float64(at.X), float64(at.Y), 1)
-		time.Sleep(50 * time.Millisecond)
-		hidden = !cursorVisible()
-	}
+		syntheticKey(testKeyF9, true)
+		syntheticKey(testKeyF9, false)
 
-	syntheticKey(testKeyF9, true)
-	syntheticKey(testKeyF9, false)
-	time.Sleep(200 * time.Millisecond)
-	restored := cursorVisible()
+		// If the hide was refused, the pointer is on its way to the centre.
+		// Wait for it to land, then do what hardware does next: one event at
+		// the new position whose delta is the jump — here +900 in x, a push
+		// past the device's far edge for a host on the right.
+		arrived := false
+		for i := 0; i < 20 && !arrived; i++ {
+			time.Sleep(25 * time.Millisecond)
+			p, _ := currentCursorPoint()
+			arrived = closerTo(p, centre, corner)
+		}
+		at := corner
+		if arrived {
+			at = centre
+		}
+		syntheticMouseMoveTo(float64(at.X), float64(at.Y), 900)
+
+		// The retries ride on events; keep some coming, as a hand would,
+		// from where the pointer now sits.
+		for i := 0; i < 20 && !hidden[round]; i++ {
+			syntheticMouseMoveTo(float64(at.X), float64(at.Y), 1)
+			time.Sleep(50 * time.Millisecond)
+			hidden[round] = !cursorVisible()
+		}
+
+		syntheticKey(testKeyF9, true)
+		syntheticKey(testKeyF9, false)
+		time.Sleep(100 * time.Millisecond)
+		// The show is confirmed on motion, as a returning hand supplies.
+		for i := 0; i < 10 && !restored[round]; i++ {
+			syntheticMouseMoveTo(float64(at.X)+float64(i), float64(at.Y), 1)
+			time.Sleep(50 * time.Millisecond)
+			restored[round] = cursorVisible()
+		}
+	}
 
 	cancel()
 	select {
@@ -191,6 +207,7 @@ func TestIntegrationHideSurvivesTheDock(t *testing.T) {
 		if event.Kind != EventRemoteMode {
 			continue
 		}
+		t.Logf("remote mode active=%v source=%s", event.Active, event.Source)
 		if event.Active {
 			entries++
 		} else if event.Source == "slave_edge" {
@@ -200,14 +217,100 @@ func TestIntegrationHideSurvivesTheDock(t *testing.T) {
 	if entries == 0 {
 		t.Fatal("the hotkey did not enter remote mode")
 	}
-	if bounced || entries > 1 {
-		t.Errorf("remote mode bounced: %d entries, slave-edge exit %v — the relocation jump reached the return model", entries, bounced)
+	if bounced || entries > rounds {
+		t.Errorf("remote mode bounced: %d entries for %d rounds, slave-edge exit %v — the relocation jump reached the return model", entries, rounds, bounced)
 	}
-	if !hidden {
-		t.Error("the local pointer was still visible a second after entering remote mode beside the Dock")
+	for round := 0; round < rounds; round++ {
+		if !hidden[round] {
+			t.Errorf("round %d: the local pointer was still visible a second after entering remote mode beside the Dock", round+1)
+		}
+		if !restored[round] {
+			t.Errorf("round %d: the pointer did not come back after leaving remote mode", round+1)
+		}
 	}
-	if !restored {
-		t.Error("the pointer did not come back after leaving remote mode")
+}
+
+// drainRemoteEntries empties the event channel and reports whether an edge
+// entry was among what it held.
+func drainRemoteEntries(events <-chan Event) bool {
+	entered := false
+	for {
+		select {
+		case event := <-events:
+			if event.Kind == EventRemoteMode && event.Active && event.Source == "edge" {
+				entered = true
+			}
+		default:
+			return entered
+		}
+	}
+}
+
+// TestIntegrationStartOnEdgeDoesNotEnter starts a session with the pointer
+// already on the activation edge, which is where the previous session's
+// exit leaves it. A session that began armed entered on the first jiggle
+// after a relaunch: the pointer vanished, input went to the device, and the
+// app looked broken. The pointer has to leave the edge first.
+func TestIntegrationStartOnEdgeDoesNotEnter(t *testing.T) {
+	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
+		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
+	}
+	if perms := CheckPermissions(); !perms.OK(true) {
+		t.Skipf("missing permissions: %s", perms.PermissionHint(true))
+	}
+
+	// Park the pointer on the edge before the session exists.
+	syntheticMouseMoveTo(0, 400, -4)
+	time.Sleep(150 * time.Millisecond)
+
+	events := make(chan Event, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Options{
+			CaptureKeyboard: true,
+			ToggleHotkey:    "F9",
+			SlaveWidth:      1080,
+			SlaveHeight:     1920,
+			HostSide:        HostSideRight,
+			AutoSwitch:      true,
+			EdgeAnyDisplay:  true,
+		}, events, func() bool { return true })
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	// Jiggling on the edge, as a hand does on reaching for the mouse.
+	for i := 0; i < 5; i++ {
+		syntheticMouseMoveTo(0, 400, -8)
+		time.Sleep(30 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	enteredOnStart := drainRemoteEntries(events)
+
+	// Leave the edge and come back: that is a crossing.
+	syntheticMouseMoveTo(300, 400, 300)
+	time.Sleep(50 * time.Millisecond)
+	syntheticMouseMoveTo(0, 400, -300)
+	time.Sleep(200 * time.Millisecond)
+	enteredAfterLeaving := drainRemoteEntries(events)
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+
+	if enteredOnStart {
+		t.Error("a session that started with the pointer on the edge entered remote mode without the pointer leaving it")
+	}
+	if !enteredAfterLeaving {
+		t.Error("leaving the edge and coming back did not enter remote mode")
 	}
 }
 
@@ -485,6 +588,11 @@ func TestIntegrationEdgeContactEntersWithoutPush(t *testing.T) {
 	}()
 	time.Sleep(500 * time.Millisecond)
 
+	// Arrive from inside the display: a session whose pointer begins on
+	// the edge starts disarmed, so the previous test's parking spot must
+	// not count as reaching it.
+	syntheticMouseMoveTo(300, 300, 0)
+	time.Sleep(50 * time.Millisecond)
 	syntheticMouseMoveTo(0, 300, -8)
 	time.Sleep(300 * time.Millisecond)
 

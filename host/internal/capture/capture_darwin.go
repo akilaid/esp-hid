@@ -58,6 +58,10 @@ const (
 	// and leaving the pointer visible for the session. The relocation that
 	// unblocks it lands within a handful.
 	hideRetryLimit = 60
+	// How many motion events after an exit the pointer is shown again on if
+	// the window server still reports it hidden. Never leave the Mac without
+	// a pointer, whatever became of the hide count.
+	showRetryLimit = 10
 	// How long motion is withheld after a relocation if the pointer never
 	// shows up at the target — the event was lost, so stop waiting for it.
 	relocateSettleLimit = 500 * time.Millisecond
@@ -87,10 +91,16 @@ type session struct {
 
 	remoteModeActive bool
 	cursorHidden     bool
-	// The hide was refused at entry (the Dock was tracking the pointer) and
-	// is retried on later events, once the relocation has taken.
+	// The hide is not yet confirmed by the window server on a motion event
+	// (the Dock may be tracking the pointer, or a key event may have hidden
+	// it for typing) and is verified again on the events that follow.
 	hidePending bool
 	hideRetries int
+	relocated   bool
+	// After an exit the show is likewise verified on the motion events that
+	// follow, and repeated until the pointer is back.
+	showPending bool
+	showRetries int
 	// A relocation has been posted and the pointer has not yet arrived at
 	// pinPoint from relocateOrigin. Motion is withheld until it has: the
 	// first hardware event at the new position reports the whole jump as
@@ -174,6 +184,12 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 	sess.refreshMonitorRects()
 	if cursor, ok := sess.cursorPoint(); ok {
 		sess.setAnchorForPoint(cursor)
+		// A pointer already on the activation edge must leave it before it
+		// can cross. The previous session's exit parks it exactly there,
+		// and starting armed turned the first jiggle after a relaunch into
+		// an entry nobody asked for — the pointer vanished and the app
+		// looked broken.
+		sess.edgeArmed = !sess.canActivateFromHostEdge(cursor)
 	} else {
 		sess.remoteAnchor = sess.virtualDesktopRect().centerPoint()
 		sess.entryPoint = sess.remoteAnchor
@@ -257,8 +273,8 @@ func (s *session) handleEvent(eventType C.CGEventType, event C.CGEventRef) C.CGE
 
 	s.maybeStall()
 	s.disableRemoteIfDisconnected()
-	if s.hidePending {
-		s.retryHide()
+	if s.hidePending || s.showPending {
+		s.verifyCursor(isMotionEvent(eventType))
 	}
 
 	switch uint32(eventType) {
@@ -616,7 +632,11 @@ func (s *session) setRemoteMode(active bool, source string) {
 		// frontmost it stops the pointer without any warping at all — but the
 		// pin in handleMouseMove is what actually carries the guarantee.
 		C.ehbSetMouseAssociation(0)
-		s.hideLocalCursor()
+		s.showPending = false
+		s.hidePending = true
+		s.hideRetries = 0
+		s.relocated = false
+		s.verifyHide(false)
 		// Seed the shadow without emitting: the toggle hotkey itself often
 		// holds modifiers, and pressing Ctrl+Alt+F7 to enter must not send
 		// Ctrl and Alt to the slave. The later release produces an "up" for a
@@ -625,10 +645,10 @@ func (s *session) setRemoteMode(active bool, source string) {
 	} else {
 		s.hidePending = false
 		s.relocating = false
-		if s.cursorHidden {
-			C.ehbShowCursor()
-			s.cursorHidden = false
-		}
+		s.cursorHidden = false
+		s.showPending = true
+		s.showRetries = 0
+		s.verifyShow(false)
 		C.ehbSetMouseAssociation(1)
 		// The bridge sends RELEASE_ALL on deactivate, so the slave is clean;
 		// zeroing keeps the local shadow honest for the next activation.
@@ -643,8 +663,36 @@ func (s *session) exitRemote(returnPoint point, source string) {
 	s.setRemoteMode(false, source)
 }
 
-// hideLocalCursor hides the pointer for the duration of remote mode — and
-// checks that it happened, because the Dock can refuse.
+func isMotionEvent(eventType C.CGEventType) bool {
+	switch uint32(eventType) {
+	case uint32(C.kCGEventMouseMoved),
+		uint32(C.kCGEventLeftMouseDragged),
+		uint32(C.kCGEventRightMouseDragged),
+		uint32(C.kCGEventOtherMouseDragged):
+		return true
+	}
+	return false
+}
+
+// verifyCursor runs at the top of every event while a hide or a show is
+// still unconfirmed. Only a motion event can confirm either: the visibility
+// the window server reports is global, and macOS hides the pointer for
+// typing too, so a key event's answer proves nothing about this session's
+// hide. Motion ends that.
+func (s *session) verifyCursor(motion bool) {
+	if s.remoteModeActive {
+		if s.hidePending {
+			s.verifyHide(motion)
+		}
+		return
+	}
+	if s.showPending {
+		s.verifyShow(motion)
+	}
+}
+
+// verifyHide hides the pointer for the duration of remote mode — and checks
+// that it happened, because the Dock can refuse.
 //
 // While the Dock is tracking the pointer (a mouse event has landed in its
 // strip, even the empty part beside the tiles, and none has landed outside
@@ -652,30 +700,65 @@ func (s *session) exitRemote(returnPoint point, source string) {
 // Entering from beside the Dock therefore left the pointer visible and
 // following the mouse across the desktop while the device moved too. Only an
 // event ends the tracking; the pin warps never will. So the pointer is sent
-// to the monitor centre with a real, tagged event, and the hide is retried
-// on the events that follow until the window server agrees. Where the
-// pointer is parked is internal — the exit warps it to the return point —
-// so the jump costs nothing.
-func (s *session) hideLocalCursor() {
+// to the monitor centre with a real, tagged event, once per entry, and the
+// hide is tried again on the events that follow until the window server
+// agrees. Where the pointer is parked is internal — the exit warps it to
+// the return point — so the jump costs nothing. The relocation reaches the
+// Dock a moment after it passes this tap, so the first try or two after it
+// may still be refused.
+func (s *session) verifyHide(motion bool) {
 	if C.ehbHideCursor() != 0 {
 		s.cursorHidden = true
+		if motion {
+			s.hidePending = false
+		}
+		return
+	}
+	s.cursorHidden = false
+	if !s.relocated {
+		s.relocated = true
+		target := s.monitorCentre(s.pinPoint)
+		s.relocating = true
+		s.relocateOrigin = s.pinPoint
+		s.relocateDeadline = time.Now().Add(relocateSettleLimit)
+		s.pinPoint = target
+		log.Printf("capture: the Dock is holding the pointer; relocating it to %d,%d before hiding", target.X, target.Y)
+		// Posted off the tap thread: an active tap's callback is answering
+		// the window server, and posting is a message back to it.
+		go C.ehbPostRelocation(C.double(target.X), C.double(target.Y))
+		return
+	}
+	s.hideRetries++
+	if s.hideRetries >= hideRetryLimit {
 		s.hidePending = false
+		log.Print("capture: the local pointer could not be hidden; it stays visible for this session")
+	}
+}
+
+// verifyShow brings the pointer back after remote mode — and checks that it
+// happened. Every hide is paired with a show by construction, but the
+// window server's count is not observable, and a Mac without a pointer is
+// not recoverable from the GUI; so if it still reports the pointer hidden
+// on the motion events after an exit, it is shown again, a bounded number
+// of times. The read straight after a show is stale, so the exit itself
+// confirms nothing; the first motion event does.
+func (s *session) verifyShow(motion bool) {
+	if C.ehbShowCursor(0) != 0 {
+		if motion {
+			s.showPending = false
+		}
 		return
 	}
-	if s.hidePending {
+	if !motion {
 		return
 	}
-	s.hidePending = true
-	s.hideRetries = 0
-	target := s.monitorCentre(s.pinPoint)
-	s.relocating = true
-	s.relocateOrigin = s.pinPoint
-	s.relocateDeadline = time.Now().Add(relocateSettleLimit)
-	s.pinPoint = target
-	log.Printf("capture: the Dock is holding the pointer; relocating it to %d,%d before hiding", target.X, target.Y)
-	// Posted off the tap thread: an active tap's callback is answering the
-	// window server, and posting is a message back to it.
-	go C.ehbPostRelocation(C.double(target.X), C.double(target.Y))
+	s.showRetries++
+	if s.showRetries >= showRetryLimit {
+		s.showPending = false
+		log.Print("capture: the window server still reports the pointer hidden after leaving remote mode")
+		return
+	}
+	C.ehbShowCursor(1)
 }
 
 // settleRelocation withholds motion until the pointer has arrived at the
@@ -705,35 +788,24 @@ func (s *session) settleRelocation(event C.CGEventRef) bool {
 	return true
 }
 
-// retryHide runs at the top of every event while a hide is pending. The
-// relocation reaches the Dock a moment after it passes this tap, so the
-// first retry or two may still be refused.
-func (s *session) retryHide() {
-	if !s.remoteModeActive {
-		s.hidePending = false
-		return
-	}
-	if C.ehbHideCursor() != 0 {
-		s.cursorHidden = true
-		s.hidePending = false
-		return
-	}
-	s.hideRetries++
-	if s.hideRetries >= hideRetryLimit {
-		s.hidePending = false
-		log.Print("capture: the local pointer could not be hidden; it stays visible for this session")
-	}
-}
-
 // restoreCursor is the unconditional teardown. Both cursor hiding and mouse
 // dissociation are scoped to this process's window server connection, so a
 // crash would undo them anyway — but a clean exit must not rely on that.
+// No events follow, so the show is repeated here rather than verified on
+// them; the process may go on to run another session.
 func (s *session) restoreCursor() {
 	s.hidePending = false
+	s.showPending = false
 	s.relocating = false
-	if s.cursorHidden {
-		C.ehbShowCursor()
-		s.cursorHidden = false
+	s.cursorHidden = false
+	C.ehbShowCursor(0)
+	for i := 0; i < showRetryLimit; i++ {
+		// Past the ~150us it takes a show to be reflected.
+		time.Sleep(time.Millisecond)
+		if C.ehbShowCursor(0) != 0 {
+			break
+		}
+		C.ehbShowCursor(1)
 	}
 	C.ehbSetMouseAssociation(1)
 }

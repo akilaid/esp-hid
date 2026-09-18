@@ -196,7 +196,12 @@ Windows GUI therefore does not show the push controls, and its
 cursor *exactly on* the activation edge for all four host sides, so
 `canActivateFromHostEdge` is true the instant remote mode exits; only the
 disarm stops an immediate re-entry loop. Pressure, when on, narrows that
-window but must never become the only guard.
+window but must never become the only guard. The disarm must also survive
+a restart: a session whose pointer already sits on the edge starts
+disarmed (`edgeArmed = !canActivateFromHostEdge(cursor)` in `Run`, both
+platforms), because the previous session's exit is what parked it there,
+and starting armed turned the first nudge after a relaunch into an entry.
+`TestIntegrationStartOnEdgeDoesNotEnter` pins it.
 
 The return lands level with the recorded crossing point (`entryPoint`), not the
 middle of the edge. `remoteAnchor` stays the monitor *centre* on purpose: it is
@@ -253,8 +258,14 @@ defect in the retired v1 macOS app:
   real event (`ehbPostRelocation`, recognised by `ehbEventIsRelocation` and
   passed through the tap untouched so the Dock sees it) moving the pointer
   to the monitor centre, and `retryHide` re-asks on the following events.
-  A refused hide does not count against the connection (measured: one show
-  undoes a later successful one). Keep `pinPoint` internal — nothing may
+  Measured hide-count semantics: a refused hide does not count, a taken one
+  does (two hides need two shows), shows past zero are harmless, a hide is
+  reflected synchronously and a show only after ~150µs, and
+  `CGCursorIsVisible` is global — it also reads false while macOS hides the
+  pointer for typing. Hence `verifyHide`/`verifyShow`: every hide that did
+  not take is undone before it is retried, both are confirmed only on mouse
+  motion events, and after an exit the pointer is shown again until the
+  window server agrees it is back. Keep `pinPoint` internal — nothing may
   depend on where the hidden pointer sits, since the relocation moves it.
   **A posted move is not a warp**: the first hardware event generated after
   it reports the whole jump as its delta (measured: dx=-74 dy=246 for a
