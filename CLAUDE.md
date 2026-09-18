@@ -205,7 +205,7 @@ is the key that re-finds the entry monitor on exit. Feed `returnPointInRect`
 the entry point, never the anchor.
 
 ### macOS specifics
-Four things the implementation must keep doing, the first three each fixing a
+Five things the implementation must keep doing, the first three each fixing a
 defect in the retired v1 macOS app:
 
 - **Re-enable the tap** on `kCGEventTapDisabledByTimeout` /
@@ -241,6 +241,22 @@ defect in the retired v1 macOS app:
   window front. Measurements behind the design: warping emits no events (0
   after 2000 warps, via `CGEventSourceCounterForEventType`) and costs ~20µs,
   so it is safe inside the callback.
+- **The Dock can refuse the hide, so verify it.** While the Dock is
+  tracking the pointer — from the first mouse *event* anywhere in its strip,
+  the empty part beside the tiles included, until one lands outside — the
+  window server ignores this connection's hide *and* its warps. Entering
+  from beside the Dock therefore left the pointer visible and following the
+  mouse. Warps never end the tracking (the Dock only sees events), and the
+  Dock's window covers the whole display, so "over the Dock" cannot be read
+  from geometry either. `ehbHideCursor` therefore asks `CGCursorIsVisible`
+  whether the hide took; when refused, `hideLocalCursor` posts one tagged
+  real event (`ehbPostRelocation`, recognised by `ehbEventIsRelocation` and
+  passed through the tap untouched so the Dock sees it) moving the pointer
+  to the monitor centre, and `retryHide` re-asks on the following events.
+  A refused hide does not count against the connection (measured: one show
+  undoes a later successful one). `TestIntegrationHideSurvivesTheDock` pins
+  it. Keep `pinPoint` internal — nothing may depend on where the hidden
+  pointer sits, since the relocation moves it.
 
 Never block in the tap callback — only the non-blocking `publish` is allowed.
 `-debug-stall-capture` deliberately stalls it to exercise the recovery path.

@@ -37,6 +37,12 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
 - **A link drop while remote no longer re-enters the moment the link
   returns.** The exit parks the pointer on the activation edge; it must
   leave the edge before it can cross again. Both platforms.
+- **macOS: entering from beside the Dock left the Mac's pointer visible and
+  moving.** While the Dock is tracking the pointer the window server ignores
+  the bridge's hide and its pinning, and only a real mouse event outside the
+  Dock ends the tracking. The bridge now checks that the hide took and, if
+  not, moves the pointer to the middle of the display with one real event
+  and hides it there.
 
 ## [2.4.7] — 2026-09-15
 

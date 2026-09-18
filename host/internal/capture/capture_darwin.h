@@ -83,8 +83,21 @@ void ehbSetMouseAssociation(int associated);
 void ehbSetLocalEventsSuppression(double seconds);
 // Idempotent, and display-count independent: CGDisplayHideCursor ignores its
 // display argument and keeps one hide count per window server connection.
-void ehbHideCursor(void);
+//
+// Returns non-zero when the window server agrees the cursor is now hidden.
+// It refuses while the Dock is tracking the pointer — from the moment a
+// mouse *event* lands anywhere in the Dock's strip until one lands outside
+// it; warps do not count either way — and a refused hide leaves nothing to
+// undo (measured: it does not add to the hide count). See ehbPostRelocation.
+int ehbHideCursor(void);
 void ehbShowCursor(void);
+// Posts a real mouse-moved event to (x, y), tagged so the tap can recognise
+// it. This is how the pointer is taken away from the Dock: only an event
+// makes the Dock stop tracking, and a tracked pointer can be neither hidden
+// nor warped. The tap must pass the event through untouched, or the Dock
+// never sees it.
+void ehbPostRelocation(double x, double y);
+int ehbEventIsRelocation(CGEventRef event);
 void ehbCursorPosition(double *x, double *y);
 uint64_t ehbCurrentFlags(void);
 // Fills out with {x, y, w, h} per display; returns the number written.

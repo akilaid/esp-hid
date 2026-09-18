@@ -53,6 +53,11 @@ const (
 	// How long -debug-stall-capture blocks the callback. The window server
 	// disables a tap whose callback overruns about a second.
 	debugStallDuration = 3 * time.Second
+
+	// How many events a refused cursor hide is retried over before giving up
+	// and leaving the pointer visible for the session. The relocation that
+	// unblocks it lands within a handful.
+	hideRetryLimit = 60
 )
 
 // session holds every piece of mutable capture state. It is created before
@@ -79,8 +84,12 @@ type session struct {
 
 	remoteModeActive bool
 	cursorHidden     bool
-	edgeArmed        bool
-	hotkeyDown       bool
+	// The hide was refused at entry (the Dock was tracking the pointer) and
+	// is retried on later events, once the relocation has taken.
+	hidePending bool
+	hideRetries int
+	edgeArmed   bool
+	hotkeyDown  bool
 	// remoteAnchor is the monitor centre, the key that re-finds the entry
 	// monitor on exit (and, on Windows, the pin point too). entryPoint is
 	// where the pointer actually crossed, so the return lands on that row or
@@ -230,8 +239,17 @@ func (s *session) handleEvent(eventType C.CGEventType, event C.CGEventRef) C.CGE
 		return event
 	}
 
+	// Our own relocation on its way to the Dock. It must arrive there
+	// untouched, and its position jump is not motion for the device.
+	if C.ehbEventIsRelocation(event) != 0 {
+		return event
+	}
+
 	s.maybeStall()
 	s.disableRemoteIfDisconnected()
+	if s.hidePending {
+		s.retryHide()
+	}
 
 	switch uint32(eventType) {
 	case uint32(C.kCGEventMouseMoved),
@@ -583,16 +601,14 @@ func (s *session) setRemoteMode(active bool, source string) {
 		// frontmost it stops the pointer without any warping at all — but the
 		// pin in handleMouseMove is what actually carries the guarantee.
 		C.ehbSetMouseAssociation(0)
-		if !s.cursorHidden {
-			C.ehbHideCursor()
-			s.cursorHidden = true
-		}
+		s.hideLocalCursor()
 		// Seed the shadow without emitting: the toggle hotkey itself often
 		// holds modifiers, and pressing Ctrl+Alt+F7 to enter must not send
 		// Ctrl and Alt to the slave. The later release produces an "up" for a
 		// key never marked down, which core.KeyTracker filters out.
 		s.reconcileModifiers(uint64(C.ehbCurrentFlags()), 0, false)
 	} else {
+		s.hidePending = false
 		if s.cursorHidden {
 			C.ehbShowCursor()
 			s.cursorHidden = false
@@ -611,10 +627,63 @@ func (s *session) exitRemote(returnPoint point, source string) {
 	s.setRemoteMode(false, source)
 }
 
+// hideLocalCursor hides the pointer for the duration of remote mode — and
+// checks that it happened, because the Dock can refuse.
+//
+// While the Dock is tracking the pointer (a mouse event has landed in its
+// strip, even the empty part beside the tiles, and none has landed outside
+// since) the window server ignores this connection's hide *and* its warps.
+// Entering from beside the Dock therefore left the pointer visible and
+// following the mouse across the desktop while the device moved too. Only an
+// event ends the tracking; the pin warps never will. So the pointer is sent
+// to the monitor centre with a real, tagged event, and the hide is retried
+// on the events that follow until the window server agrees. Where the
+// pointer is parked is internal — the exit warps it to the return point —
+// so the jump costs nothing.
+func (s *session) hideLocalCursor() {
+	if C.ehbHideCursor() != 0 {
+		s.cursorHidden = true
+		s.hidePending = false
+		return
+	}
+	if s.hidePending {
+		return
+	}
+	s.hidePending = true
+	s.hideRetries = 0
+	target := s.monitorCentre(s.pinPoint)
+	s.pinPoint = target
+	log.Printf("capture: the Dock is holding the pointer; relocating it to %d,%d before hiding", target.X, target.Y)
+	// Posted off the tap thread: an active tap's callback is answering the
+	// window server, and posting is a message back to it.
+	go C.ehbPostRelocation(C.double(target.X), C.double(target.Y))
+}
+
+// retryHide runs at the top of every event while a hide is pending. The
+// relocation reaches the Dock a moment after it passes this tap, so the
+// first retry or two may still be refused.
+func (s *session) retryHide() {
+	if !s.remoteModeActive {
+		s.hidePending = false
+		return
+	}
+	if C.ehbHideCursor() != 0 {
+		s.cursorHidden = true
+		s.hidePending = false
+		return
+	}
+	s.hideRetries++
+	if s.hideRetries >= hideRetryLimit {
+		s.hidePending = false
+		log.Print("capture: the local pointer could not be hidden; it stays visible for this session")
+	}
+}
+
 // restoreCursor is the unconditional teardown. Both cursor hiding and mouse
 // dissociation are scoped to this process's window server connection, so a
 // crash would undo them anyway — but a clean exit must not rely on that.
 func (s *session) restoreCursor() {
+	s.hidePending = false
 	if s.cursorHidden {
 		C.ehbShowCursor()
 		s.cursorHidden = false
@@ -707,9 +776,14 @@ func (s *session) returnToHostPoint() point {
 
 func (s *session) setAnchorForPoint(p point) {
 	s.entryPoint = p
+	s.remoteAnchor = s.monitorCentre(p)
+}
+
+// monitorCentre is the centre of the display holding p, or of the whole
+// desktop when no display does.
+func (s *session) monitorCentre(p point) point {
 	if rect, found := s.findMonitor(p); found {
-		s.remoteAnchor = rect.centerPoint()
-		return
+		return rect.centerPoint()
 	}
-	s.remoteAnchor = s.virtualDesktopRect().centerPoint()
+	return s.virtualDesktopRect().centerPoint()
 }

@@ -71,6 +71,21 @@ static void ehbTestPostFlagsChanged(int keyCode, unsigned long long flags) {
   CFRelease(event);
 }
 
+// What the window server says, not what this process asked for. Deprecated
+// since 10.9 and still the only way to observe a refused hide.
+static int ehbTestCursorVisible(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  return CGCursorIsVisible() ? 1 : 0;
+#pragma clang diagnostic pop
+}
+
+static void ehbTestMainDisplaySize(double *width, double *height) {
+  CGRect bounds = CGDisplayBounds(CGMainDisplayID());
+  *width = bounds.size.width;
+  *height = bounds.size.height;
+}
+
 static int ehbTestOtherMouseDown(void) { return kCGEventOtherMouseDown; }
 static int ehbTestOtherMouseUp(void)   { return kCGEventOtherMouseUp; }
 static int ehbTestLeftMouseDown(void)  { return kCGEventLeftMouseDown; }
@@ -92,6 +107,16 @@ func syntheticMouseMove(dx, dy int) {
 
 func syntheticMouseMoveTo(x, y float64, dx int) {
 	C.ehbTestPostMouseMoveTo(C.double(x), C.double(y), C.int(dx))
+}
+
+func cursorVisible() bool {
+	return C.ehbTestCursorVisible() != 0
+}
+
+func mainDisplaySize() (float64, float64) {
+	var width, height C.double
+	C.ehbTestMainDisplaySize(&width, &height)
+	return float64(width), float64(height)
 }
 
 func syntheticLeftButton(down bool) {
