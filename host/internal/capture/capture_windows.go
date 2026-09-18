@@ -381,6 +381,9 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 			// true outer border activates.
 			return isOuterActivationEdgePoint(p, virtualDesktopRect(), nil, hostSide)
 		}
+		if !opts.EdgeAnyDisplay && !monitorOnDesktopBoundary(rect, monitorRects, hostSide) {
+			return false
+		}
 		return isOuterActivationEdgePoint(p, rect, monitorRects, hostSide)
 	}
 	returnToHostPoint := func() point {
@@ -411,6 +414,10 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 	// The invariant: at the top of BOTH hook callbacks, if the link is gone,
 	// warp home and exit remote mode. You can never be trapped controlling a
 	// device the link cannot reach.
+	//
+	// Disarmed on the way out like every other exit: the pointer is parked on
+	// the activation edge, and if the link comes back before it moves away,
+	// an armed edge would re-enter on the very next event.
 	disableRemoteIfDisconnected := func() {
 		if !remoteModeActive {
 			return
@@ -421,7 +428,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 		returnPoint := returnToHostPoint()
 		setCursorPosition(returnPoint.X, returnPoint.Y)
 		setRemoteModeActive(false, "serial")
-		edgeArmed = true
+		edgeArmed = false
 		leftwardReturn.reset()
 		slaveCursor.resetPressure()
 	}
@@ -441,7 +448,12 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 
 			if !remoteModeActive && uint32(wParam) == wmMouseMove {
 				if !activationAllowed() {
-					edgeArmed = true
+					// Only leaving the edge re-arms, link or no link: a
+					// pointer parked on the border by a link-drop exit must
+					// not cross again the moment the link returns.
+					if !canActivateFromHostEdge(lParam.Pt) {
+						edgeArmed = true
+					}
 					leftwardReturn.reset()
 					slaveCursor.resetPressure()
 				} else if opts.AutoSwitch && canActivateFromHostEdge(lParam.Pt) {

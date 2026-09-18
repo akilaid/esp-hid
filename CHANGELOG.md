@@ -8,6 +8,36 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.5.0] — 2026-09-18
+
+### Added
+
+- **Switch from any display's edge** (`-edge-any-display`, default off).
+  Only the display that sits beside the device crosses now. A taller
+  display next to a shorter one exposes part of its own border past the
+  neighbour, and dragging into that strip used to switch even though the
+  device is not there; turn the setting on to get that back.
+- **Push to switch** (`-edge-push`) with an editable **Push force**
+  (`-edge-push-force`, `1`–`2000`, default `200`, the value that was built
+  in). macOS only: Windows has no motion to measure once the pointer is
+  clamped.
+
+### Changed
+
+- **macOS crosses on contact by default**, as Windows always has. Pushing
+  against the edge is now the opt-in setting above; turn it on with a
+  single display, where the Dock and menu bar share that edge.
+
+### Fixed
+
+- **macOS: the pointer no longer hesitates on the host edge after coming
+  back.** The exit warps it there, and a warp starts a quarter-second
+  interval during which mouse motion goes nowhere. That interval is now
+  zero for the bridge's window-server connection.
+- **A link drop while remote no longer re-enters the moment the link
+  returns.** The exit parks the pointer on the activation edge; it must
+  leave the edge before it can cross again. Both platforms.
+
 ## [2.4.7] — 2026-09-15
 
 ### Fixed
@@ -288,6 +318,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.5.0]: https://github.com/akilaid/esp-hid/compare/v2.4.7...v2.5.0
 [2.4.7]: https://github.com/akilaid/esp-hid/compare/v2.4.6...v2.4.7
 [2.4.6]: https://github.com/akilaid/esp-hid/compare/v2.4.5...v2.4.6
 [2.4.5]: https://github.com/akilaid/esp-hid/compare/v2.4.4...v2.4.5

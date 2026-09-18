@@ -134,6 +134,8 @@ func TestIntegrationEdgeEntryPersists(t *testing.T) {
 			SlaveHeight:     1920,
 			HostSide:        HostSideRight,
 			AutoSwitch:      true,
+			EdgePush:        true, // these tests exercise the pressure path
+			EdgeAnyDisplay:  true, // and must not depend on this Mac's display arrangement
 		}, events, func() bool { return true })
 	}()
 	time.Sleep(500 * time.Millisecond)
@@ -220,6 +222,8 @@ func TestIntegrationEdgeExitReturnsToEntryRow(t *testing.T) {
 			SlaveHeight:     1920,
 			HostSide:        HostSideRight,
 			AutoSwitch:      true,
+			EdgePush:        true, // these tests exercise the pressure path
+			EdgeAnyDisplay:  true, // and must not depend on this Mac's display arrangement
 		}, events, func() bool { return true })
 	}()
 	time.Sleep(500 * time.Millisecond)
@@ -303,6 +307,8 @@ func TestIntegrationEdgeTouchAloneDoesNotEnter(t *testing.T) {
 			SlaveHeight:     1920,
 			HostSide:        HostSideRight,
 			AutoSwitch:      true,
+			EdgePush:        true, // these tests exercise the pressure path
+			EdgeAnyDisplay:  true, // and must not depend on this Mac's display arrangement
 		}, events, func() bool { return true })
 	}()
 	time.Sleep(500 * time.Millisecond)
@@ -328,6 +334,57 @@ func TestIntegrationEdgeTouchAloneDoesNotEnter(t *testing.T) {
 			t.Fatal("touching the edge without pushing against it entered remote mode")
 		}
 	}
+}
+
+// TestIntegrationEdgeContactEntersWithoutPush is the default now: with
+// EdgePush off, the same single touch that the previous test proves inert
+// crosses on contact, as it always has on Windows.
+func TestIntegrationEdgeContactEntersWithoutPush(t *testing.T) {
+	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
+		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
+	}
+	if perms := CheckPermissions(); !perms.OK(true) {
+		t.Skipf("missing permissions: %s", perms.PermissionHint(true))
+	}
+
+	events := make(chan Event, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Options{
+			CaptureKeyboard: true,
+			ToggleHotkey:    "F9",
+			SlaveWidth:      1080,
+			SlaveHeight:     1920,
+			HostSide:        HostSideRight,
+			AutoSwitch:      true,
+			EdgeAnyDisplay:  true,
+		}, events, func() bool { return true })
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	syntheticMouseMoveTo(0, 300, -8)
+	time.Sleep(300 * time.Millisecond)
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+	close(events)
+
+	for event := range events {
+		if event.Kind == EventRemoteMode && event.Active && event.Source == "edge" {
+			return
+		}
+	}
+	t.Fatal("reaching the edge with push off did not enter remote mode")
 }
 
 // TestIntegrationCaptureForwardsRealEvents drives the real system event tap.

@@ -50,9 +50,13 @@ type gui struct {
 	keyboardCheck *walk.CheckBox
 	autoRadio     *walk.RadioButton
 	manualRadio   *walk.RadioButton
-	resCombo      *walk.ComboBox
-	deviceCombo   *walk.ComboBox
-	orientCombo   *walk.ComboBox
+	// Push-to-switch has no Windows control: the hook sees absolute
+	// positions and has no delta once the pointer is clamped, so Windows
+	// always crosses on contact. The saved values pass through untouched.
+	anyDisplayCheck *walk.CheckBox
+	resCombo        *walk.ComboBox
+	deviceCombo     *walk.ComboBox
+	orientCombo     *walk.ComboBox
 
 	// The display-arrangement picture that chooses the host side. Untested
 	// on real Windows so far: it only draws arranger's frame and forwards
@@ -164,8 +168,8 @@ func (app *gui) build() error {
 	window := MainWindow{
 		AssignTo: &app.mw,
 		Title:    "ESP HID Bridge",
-		MinSize:  Size{Width: 560, Height: 440},
-		Size:     Size{Width: 580, Height: 460},
+		MinSize:  Size{Width: 560, Height: 470},
+		Size:     Size{Width: 580, Height: 490},
 		Layout:   VBox{},
 		MenuItems: []MenuItem{
 			Menu{
@@ -245,6 +249,15 @@ func (app *gui) build() error {
 							{AssignTo: &app.autoRadio, Text: "Auto (switch at screen edge)"},
 							{AssignTo: &app.manualRadio, Text: "Manual (hotkey only)"},
 						},
+					},
+					CheckBox{
+						AssignTo:   &app.anyDisplayCheck,
+						Text:       "Switch from any display's edge",
+						Checked:    app.cfg.EdgeAnyDisplay,
+						ColumnSpan: 4,
+						ToolTipText: "Off: only the display beside the device switches. " +
+							"On: any display whose edge faces the device, including a " +
+							"taller display's edge past a shorter neighbour.",
 					},
 				},
 			},
@@ -743,6 +756,9 @@ func (app *gui) readConfigFromForm() error {
 		HostSideIndex:   app.arranger.sideIndex(),
 		CaptureKeyboard: app.keyboardCheck.Checked(),
 		AutoSwitch:      app.autoRadio.Checked(),
+		EdgeAnyDisplay:  app.anyDisplayCheck.Checked(),
+		EdgePush:        app.cfg.EdgePush,
+		EdgePushForce:   strconv.Itoa(app.cfg.EdgePushForce),
 	}
 	return values.Apply(&app.cfg)
 }
@@ -812,6 +828,7 @@ func (app *gui) setRunning(running bool) {
 	app.keyboardCheck.SetEnabled(!running)
 	app.autoRadio.SetEnabled(!running)
 	app.manualRadio.SetEnabled(!running)
+	app.anyDisplayCheck.SetEnabled(!running)
 	app.resCombo.SetEnabled(!running)
 	app.arrangeWidget.SetEnabled(!running)
 	app.arrangeWidget.Invalidate()

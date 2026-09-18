@@ -18,9 +18,10 @@ const (
 	leftwardReturnThreshold = 900
 	leftwardReturnWindow    = 450 * time.Millisecond
 	// How hard the pointer must be pushed into the outer edge before it
-	// crosses. Reaching the border is not enough on a single-display Mac,
-	// where the same borders carry the Dock, the menu bar and every window's
-	// close button — see edgeEntryPressure.
+	// crosses, when the user has turned pushing on (Options.EdgePush). This
+	// is the default for Options.EdgePushForce. Reaching the border is not
+	// enough on a single-display Mac, where the same borders carry the Dock,
+	// the menu bar and every window's close button — see edgeEntryPressure.
 	edgeEntryPressureThreshold = 200
 	edgeEntryPressureWindow    = 500 * time.Millisecond
 )
@@ -97,6 +98,57 @@ func findMonitorForPoint(p point, monitorRects []monitorRect) (monitorRect, bool
 func pointInsideAnyMonitor(p point, monitorRects []monitorRect) bool {
 	_, found := findMonitorForPoint(p, monitorRects)
 	return found
+}
+
+// unionOfMonitorRects is the bounding box of every monitor — the virtual
+// desktop. ok is false when there are no monitors to fold.
+func unionOfMonitorRects(monitorRects []monitorRect) (bounds monitorRect, ok bool) {
+	if len(monitorRects) == 0 {
+		return monitorRect{}, false
+	}
+	bounds = monitorRects[0]
+	for _, rect := range monitorRects[1:] {
+		if rect.Left < bounds.Left {
+			bounds.Left = rect.Left
+		}
+		if rect.Top < bounds.Top {
+			bounds.Top = rect.Top
+		}
+		if rect.Right > bounds.Right {
+			bounds.Right = rect.Right
+		}
+		if rect.Bottom > bounds.Bottom {
+			bounds.Bottom = rect.Bottom
+		}
+	}
+	return bounds, true
+}
+
+// monitorOnDesktopBoundary reports whether rect is one of the displays that
+// sit beside the device: its activation border lies on the outer boundary of
+// the whole desktop on that side.
+//
+// This is a stricter question than isOuterActivationEdgePoint asks. A taller
+// display next to a shorter one exposes part of its border past the
+// neighbour, and that strip *is* an outer edge — nothing is beyond it — but
+// the display is not the one next to the device, so crossing from it is a
+// surprise. With Options.EdgeAnyDisplay off, only displays on the boundary
+// may cross. No monitors at all means rect is the whole desktop already.
+func monitorOnDesktopBoundary(rect monitorRect, monitorRects []monitorRect, hostSide string) bool {
+	desktop, ok := unionOfMonitorRects(monitorRects)
+	if !ok {
+		return true
+	}
+	switch hostSide {
+	case HostSideRight:
+		return rect.Left == desktop.Left
+	case HostSideTop:
+		return rect.Top == desktop.Top
+	case HostSideBottom:
+		return rect.Bottom == desktop.Bottom
+	default: // host on the left: activation edge is the right border
+		return rect.Right == desktop.Right
+	}
 }
 
 // isOuterActivationEdgePoint reports whether p sits on the activation edge of
@@ -353,6 +405,11 @@ func (l *leftwardReturnTracker) update(dx, dy int, now time.Time) bool {
 // running the pointer *along* a border — down the right edge to a scrollbar,
 // say — never builds pressure.
 type edgeEntryPressure struct {
+	// How much outward motion arms the crossing; 0 means
+	// edgeEntryPressureThreshold. Set once from Options.EdgePushForce and
+	// deliberately untouched by reset.
+	threshold int
+
 	amount int
 	last   time.Time
 }
@@ -360,6 +417,13 @@ type edgeEntryPressure struct {
 func (p *edgeEntryPressure) reset() {
 	p.amount = 0
 	p.last = time.Time{}
+}
+
+func (p *edgeEntryPressure) armThreshold() int {
+	if p.threshold > 0 {
+		return p.threshold
+	}
+	return edgeEntryPressureThreshold
 }
 
 // push accumulates one event's worth of outward movement and reports whether
@@ -389,7 +453,7 @@ func (p *edgeEntryPressure) push(dx, dy int, hostSide string, now time.Time) boo
 	if outward > 0 {
 		p.amount += outward
 	}
-	return p.amount >= edgeEntryPressureThreshold
+	return p.amount >= p.armThreshold()
 }
 
 func clampInt(value, minValue, maxValue int) int {

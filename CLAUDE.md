@@ -165,23 +165,38 @@ hard-won — do not adjust them casually.
 **Critical invariant:** if the link drops (`activationAllowedFn` goes false),
 the callback force-exits remote mode and restores the cursor. The hotkey is
 intentionally inert while the link is down, so you cannot get trapped
-controlling an unreachable device.
+controlling an unreachable device. That exit disarms the edge like every
+other exit, and the link-down branch re-arms only once the pointer has left
+the edge — the pointer is parked *on* the activation edge, and an armed edge
+would cross again the instant the link came back.
 
-**Edge entry is armed differently per platform, on purpose.** Windows crosses
-when the cursor reaches the outer edge; macOS additionally requires
-`edgeEntryPressure` (geometry.go) to accumulate outward motion, because a
-single-display Mac puts the Dock, menu bar and close buttons on those same
-borders. This is not an inconsistency to tidy up. It also cannot simply be
-ported to Windows: the Win32 hook path reads absolute positions
-(`lParam.Pt`) and has no delta once the cursor is clamped, whereas the
-CGEventTap keeps reporting `kCGMouseEventDeltaX/Y` (measured: 41 of 42 frozen
-events carried one).
+**Which display may cross** is `monitorOnDesktopBoundary` (geometry.go):
+by default only a display whose activation border lies on the desktop's
+outer boundary. `isOuterActivationEdgePoint` alone is not enough — a taller
+display beside a shorter one exposes a strip of its border past the
+neighbour, and the probe rightly calls that an outer edge, but it is not
+the display next to the device. `EdgeAnyDisplay` lifts the restriction.
+Build the union from the same `monitorRects` the probe uses, never from
+`GetSystemMetrics`.
+
+**Edge entry is armed differently per platform, on purpose.** Both cross when
+the cursor reaches the outer edge; macOS can additionally require
+`edgeEntryPressure` (geometry.go) to accumulate outward motion — the
+`EdgePush` / `EdgePushForce` settings, off by default, there for a
+single-display Mac that puts the Dock, menu bar and close buttons on those
+same borders. `edgeEntryPressure.threshold` is set once from the options and
+must survive `reset()`. This cannot simply be ported to Windows: the Win32
+hook path reads absolute positions (`lParam.Pt`) and has no delta once the
+cursor is clamped, whereas the CGEventTap keeps reporting
+`kCGMouseEventDeltaX/Y` (measured: 41 of 42 frozen events carried one). The
+Windows GUI therefore does not show the push controls, and its
+`readConfigFromForm` passes the saved values through untouched.
 
 `edgeArmed` remains load-bearing regardless. `returnPointInRect` lands the
 cursor *exactly on* the activation edge for all four host sides, so
 `canActivateFromHostEdge` is true the instant remote mode exits; only the
-disarm stops an immediate re-entry loop. Pressure narrows that window but must
-never become the only guard.
+disarm stops an immediate re-entry loop. Pressure, when on, narrows that
+window but must never become the only guard.
 
 The return lands level with the recorded crossing point (`entryPoint`), not the
 middle of the edge. `remoteAnchor` stays the monitor *centre* on purpose: it is
@@ -200,7 +215,13 @@ defect in the retired v1 macOS app:
   ~0.25 s. Instead: dissociate with `CGAssociateMouseAndMouseCursorPosition`
   and read `kCGMouseEventDeltaX/Y`. There is no warp on *entry* either — from a
   screen edge its delta points back at the edge just crossed and trips the
-  return-pressure model. Exit warps once, to the return point.
+  return-pressure model. Exit warps once, to the return point — and that
+  warp's suppression interval is what made the pointer hesitate on the host
+  edge after coming back. `ehbSetLocalEventsSuppression(0)` at startup
+  (`CGSetLocalEventsSuppressionInterval`, deprecated but still exported)
+  zeroes it for the whole connection. Re-associating straight after the
+  warp, the documented shortcut, is foreground-gated and so does nothing
+  for a background bridge.
 - **Forward modifiers from `flagsChanged`.** macOS never sends key down/up for
   pure modifiers. The handler reconciles all 8 usages (`0xE0..0xE7`) against
   the event flags, seeded silently on entry so the toggle combo itself is not

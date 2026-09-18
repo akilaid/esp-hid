@@ -12,7 +12,77 @@ var (
 	monitorA = monitorRect{Left: 0, Top: 0, Right: 1920, Bottom: 1080}
 	monitorB = monitorRect{Left: 1920, Top: 0, Right: 3840, Bottom: 1080}
 	desktop  = []monitorRect{monitorA, monitorB}
+
+	// A taller display to the right of monitorA, overhanging it above and
+	// below. Its left border is exposed on those overhangs — an outer edge
+	// by the probe's definition — yet it is not the display beside a device
+	// that sits to the left of the desktop.
+	monitorTall = monitorRect{Left: 1920, Top: -200, Right: 3840, Bottom: 1400}
+	desktopTall = []monitorRect{monitorA, monitorTall}
 )
+
+func TestUnionOfMonitorRects(t *testing.T) {
+	if _, ok := unionOfMonitorRects(nil); ok {
+		t.Error("no monitors should report no union")
+	}
+	got, ok := unionOfMonitorRects(desktopTall)
+	want := monitorRect{Left: 0, Top: -200, Right: 3840, Bottom: 1400}
+	if !ok || got != want {
+		t.Errorf("union = %+v, want %+v", got, want)
+	}
+}
+
+// The reported case: phone left of the left display, pointer dragged into
+// the taller right display's exposed strip. The probe says outer edge; the
+// boundary rule says wrong display.
+func TestTallNeighbourStripIsOuterButNotOnBoundary(t *testing.T) {
+	strip := point{X: 1920, Y: 1200}
+	if !isOuterActivationEdgePoint(strip, monitorTall, desktopTall, HostSideRight) {
+		t.Fatal("the exposed strip should count as an outer edge")
+	}
+	if monitorOnDesktopBoundary(monitorTall, desktopTall, HostSideRight) {
+		t.Error("the taller display is not on the desktop's left boundary")
+	}
+	if !monitorOnDesktopBoundary(monitorA, desktopTall, HostSideRight) {
+		t.Error("the display beside the device must be on the boundary")
+	}
+}
+
+func TestMonitorOnDesktopBoundaryPerSide(t *testing.T) {
+	cases := []struct {
+		hostSide string
+		onA      bool
+		onTall   bool
+	}{
+		{HostSideRight, true, false},  // activation at the left border
+		{HostSideLeft, false, true},   // right border
+		{HostSideBottom, false, true}, // top border: only Tall reaches -200
+		{HostSideTop, false, true},    // bottom border: only Tall reaches 1400
+	}
+	for _, tc := range cases {
+		if got := monitorOnDesktopBoundary(monitorA, desktopTall, tc.hostSide); got != tc.onA {
+			t.Errorf("%s: monitorA on boundary = %v, want %v", tc.hostSide, got, tc.onA)
+		}
+		if got := monitorOnDesktopBoundary(monitorTall, desktopTall, tc.hostSide); got != tc.onTall {
+			t.Errorf("%s: monitorTall on boundary = %v, want %v", tc.hostSide, got, tc.onTall)
+		}
+	}
+	// Equal-height neighbours both touch the top and bottom boundaries.
+	if !monitorOnDesktopBoundary(monitorA, desktop, HostSideBottom) ||
+		!monitorOnDesktopBoundary(monitorB, desktop, HostSideTop) {
+		t.Error("displays flush with the boundary must qualify")
+	}
+}
+
+// The single-monitor fallback passes nil rects with the whole desktop as the
+// rect; that must never be refused.
+func TestMonitorOnDesktopBoundaryWithNoMonitors(t *testing.T) {
+	for _, side := range []string{HostSideLeft, HostSideRight, HostSideTop, HostSideBottom} {
+		if !monitorOnDesktopBoundary(monitorA, nil, side) {
+			t.Errorf("%s: no monitors should mean no restriction", side)
+		}
+	}
+}
 
 func TestOuterActivationEdgeIgnoresMonitorSeam(t *testing.T) {
 	// Host on the left => activation edge is the right border. The right
@@ -408,5 +478,38 @@ func TestEdgeEntryPressureResets(t *testing.T) {
 	p.reset()
 	if pushUntil(&p, 40, 0, 4, HostSideLeft, start) {
 		t.Error("reset should discard accumulated pressure")
+	}
+}
+
+// The user's push force replaces the built-in threshold; the zero value
+// still means the built-in one, so untuned sessions behave as before.
+func TestEdgeEntryPressureHonoursCustomThreshold(t *testing.T) {
+	start := time.Now()
+
+	light := edgeEntryPressure{threshold: 80}
+	if !pushUntil(&light, 40, 0, 2, HostSideLeft, start) {
+		t.Error("two steps of 40 should arm a threshold of 80")
+	}
+
+	var builtIn edgeEntryPressure
+	if pushUntil(&builtIn, 40, 0, 2, HostSideLeft, start) {
+		t.Error("the zero value must still need the built-in threshold")
+	}
+	if builtIn.armThreshold() != edgeEntryPressureThreshold {
+		t.Errorf("zero threshold resolves to %d, want %d", builtIn.armThreshold(), edgeEntryPressureThreshold)
+	}
+}
+
+// reset runs on every off-edge event; it must clear the burst, not the dial.
+func TestEdgeEntryPressureResetKeepsThreshold(t *testing.T) {
+	p := edgeEntryPressure{threshold: 80}
+	start := time.Now()
+	pushUntil(&p, 40, 0, 1, HostSideLeft, start)
+	p.reset()
+	if p.threshold != 80 {
+		t.Fatalf("reset changed the threshold to %d", p.threshold)
+	}
+	if !pushUntil(&p, 40, 0, 2, HostSideLeft, start) {
+		t.Error("the custom threshold should still apply after reset")
 	}
 }

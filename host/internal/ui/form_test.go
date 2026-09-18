@@ -16,6 +16,7 @@ func validForm() FormValues {
 		HostSideIndex:   0,
 		CaptureKeyboard: true,
 		AutoSwitch:      true,
+		EdgePushForce:   "200",
 	}
 }
 
@@ -28,6 +29,9 @@ func TestApplyPopulatesConfig(t *testing.T) {
 	form.HostSideIndex = 1
 	form.CaptureKeyboard = false
 	form.AutoSwitch = false
+	form.EdgeAnyDisplay = true
+	form.EdgePush = true
+	form.EdgePushForce = "120"
 
 	if err := form.Apply(&cfg); err != nil {
 		t.Fatalf("Apply failed: %v", err)
@@ -47,6 +51,10 @@ func TestApplyPopulatesConfig(t *testing.T) {
 	}
 	if cfg.CaptureKeyboard || cfg.AutoSwitch {
 		t.Error("booleans did not carry through")
+	}
+	if !cfg.EdgeAnyDisplay || !cfg.EdgePush || cfg.EdgePushForce != 120 {
+		t.Errorf("edge settings = any %v push %v force %d, want true true 120",
+			cfg.EdgeAnyDisplay, cfg.EdgePush, cfg.EdgePushForce)
 	}
 }
 
@@ -97,6 +105,10 @@ func TestApplyRejectsBadInput(t *testing.T) {
 		{"resolution empty", func(f *FormValues) { f.Resolution = "" }, ""},
 		{"resolution malformed", func(f *FormValues) { f.Resolution = "1920*1080" }, ""},
 		{"resolution too small", func(f *FormValues) { f.Resolution = "100x100" }, ""},
+		{"push force not a number", func(f *FormValues) { f.EdgePushForce = "hard" }, "push force"},
+		{"push force empty", func(f *FormValues) { f.EdgePushForce = "" }, "push force"},
+		{"push force zero", func(f *FormValues) { f.EdgePushForce = "0" }, "push force"},
+		{"push force too high", func(f *FormValues) { f.EdgePushForce = "2001" }, "push force"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +137,20 @@ func TestApplyAcceptsRateBounds(t *testing.T) {
 	}
 }
 
+// The force is validated whether or not pushing is on, so a bad value cannot
+// lie dormant and then fail Validate at startup once the box is ticked.
+func TestApplyAcceptsPushForceBounds(t *testing.T) {
+	for _, force := range []string{"1", "2000", " 200 "} {
+		cfg := config.Defaults()
+		form := validForm()
+		form.EdgePush = false
+		form.EdgePushForce = force
+		if err := form.Apply(&cfg); err != nil {
+			t.Errorf("push force %q should be accepted: %v", force, err)
+		}
+	}
+}
+
 // An out-of-range index means "no selection"; it must leave the existing
 // host side alone rather than defaulting to the first entry.
 func TestApplyIgnoresOutOfRangeHostSideIndex(t *testing.T) {
@@ -147,6 +173,9 @@ func TestFormValuesRoundTrip(t *testing.T) {
 	cfg.MoveRateHz = 90
 	cfg.ToggleHotkey = "Ctrl+F5"
 	cfg.CaptureKeyboard = false
+	cfg.EdgeAnyDisplay = true
+	cfg.EdgePush = true
+	cfg.EdgePushForce = 350
 
 	form := FormValuesFrom(cfg)
 	if form.Resolution != "1080x1920" {

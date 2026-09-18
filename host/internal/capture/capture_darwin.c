@@ -172,6 +172,17 @@ void ehbSetMouseAssociation(int associated) {
   CGAssociateMouseAndMouseCursorPosition(associated ? true : false);
 }
 
+// Deprecated since 10.6 in favour of the per-event-source variant, which
+// only governs events posted through that source and so does nothing for a
+// warp. Still exported, and still what SDL and Synergy's descendants use for
+// exactly this.
+void ehbSetLocalEventsSuppression(double seconds) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  CGSetLocalEventsSuppressionInterval(seconds);
+#pragma clang diagnostic pop
+}
+
 // CGDisplayHideCursor is honoured only while this process is the frontmost
 // application, which remote mode generally is not — minimize the window and
 // the pointer reappears. There is no public way around that. This connection

@@ -71,9 +71,10 @@ type session struct {
 
 	slaveCursor *virtualCursor
 	leftward    *leftwardReturnTracker
-	// Gates edge entry: the pointer must be pushed against the outer border,
-	// not merely reach it. macOS only — Windows sees absolute positions and
-	// has no delta to measure once the pointer is clamped.
+	// Gates edge entry when opts.EdgePush is on: the pointer must be pushed
+	// against the outer border, not merely reach it. macOS only — Windows
+	// sees absolute positions and has no delta to measure once the pointer
+	// is clamped.
 	entryPressure edgeEntryPressure
 
 	remoteModeActive bool
@@ -126,6 +127,9 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 		log.Print("capture: could not enable background cursor control; the " +
 			"local pointer will stay visible unless the app is frontmost")
 	}
+	// Otherwise the pointer sits still for a quarter second after the exit
+	// warp puts it back on the host edge.
+	C.ehbSetLocalEventsSuppression(0)
 
 	toggleKey, toggleMods := hotkey.ParseDarwin(opts.ToggleHotkey)
 	if toggleKey == 0 {
@@ -142,6 +146,7 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 		hostSide:          hostSide,
 		slaveCursor:       newVirtualCursor(opts.SlaveWidth, opts.SlaveHeight, hostSide),
 		leftward:          &leftwardReturnTracker{enabled: opts.LeftwardReturn, hostSide: hostSide},
+		entryPressure:     edgeEntryPressure{threshold: opts.EdgePushForce},
 		edgeArmed:         true,
 	}
 	if sess.activationAllowed == nil {
@@ -272,12 +277,16 @@ func (s *session) maybeStall() {
 // The invariant: at the top of every event, if the link is gone, warp home
 // and exit remote mode. You can never be trapped controlling a device the
 // link cannot reach.
+//
+// Disarmed on the way out like every other exit: the pointer is parked on
+// the activation edge, and if the link comes back before it moves away, an
+// armed edge would re-enter on the very next event.
 func (s *session) disableRemoteIfDisconnected() {
 	if !s.remoteModeActive || s.activationAllowed() {
 		return
 	}
 	s.exitRemote(s.returnToHostPoint(), "serial")
-	s.edgeArmed = true
+	s.edgeArmed = false
 	s.leftward.reset()
 	s.slaveCursor.resetPressure()
 }
@@ -287,17 +296,29 @@ func (s *session) handleMouseMove(event C.CGEventRef) C.CGEventRef {
 		location := s.eventPoint(event)
 		switch {
 		case !s.activationAllowed():
-			s.edgeArmed = true
+			// Only leaving the edge re-arms, link or no link: a pointer
+			// parked on the border by a link-drop exit must not cross again
+			// the moment the link returns, but one that has wandered off
+			// and come back may.
+			if !s.canActivateFromHostEdge(location) {
+				s.edgeArmed = true
+			}
 			s.leftward.reset()
 			s.slaveCursor.resetPressure()
 			s.entryPressure.reset()
 		case s.opts.AutoSwitch && s.canActivateFromHostEdge(location):
-			// Reaching the edge is not enough here, unlike Windows: keep
-			// pushing outward against it. The pointer is already stuck, so
-			// only a deliberate shove keeps producing outward motion.
-			dx := int(C.ehbEventDeltaX(event))
-			dy := int(C.ehbEventDeltaY(event))
-			if s.edgeArmed && s.entryPressure.push(dx, dy, s.hostSide, time.Now()) {
+			// Reaching the edge crosses, as on Windows, unless the user has
+			// asked to push: then keep shoving outward against it. The
+			// pointer is already stuck, so only a deliberate shove keeps
+			// producing outward motion. Either way edgeArmed is the guard
+			// against re-entering straight after a return lands here.
+			armed := s.edgeArmed
+			if armed && s.opts.EdgePush {
+				dx := int(C.ehbEventDeltaX(event))
+				dy := int(C.ehbEventDeltaY(event))
+				armed = s.entryPressure.push(dx, dy, s.hostSide, time.Now())
+			}
+			if armed {
 				s.setAnchorForPoint(location)
 				s.slaveCursor.resetForActivation("edge")
 				s.setRemoteMode(true, "edge")
@@ -657,25 +678,10 @@ func (s *session) findMonitor(p point) (monitorRect, bool) {
 }
 
 func (s *session) virtualDesktopRect() monitorRect {
-	if len(s.monitorRects) == 0 {
-		return monitorRect{Right: 1920, Bottom: 1080}
+	if bounds, ok := unionOfMonitorRects(s.monitorRects); ok {
+		return bounds
 	}
-	bounds := s.monitorRects[0]
-	for _, rect := range s.monitorRects[1:] {
-		if rect.Left < bounds.Left {
-			bounds.Left = rect.Left
-		}
-		if rect.Top < bounds.Top {
-			bounds.Top = rect.Top
-		}
-		if rect.Right > bounds.Right {
-			bounds.Right = rect.Right
-		}
-		if rect.Bottom > bounds.Bottom {
-			bounds.Bottom = rect.Bottom
-		}
-	}
-	return bounds
+	return monitorRect{Right: 1920, Bottom: 1080}
 }
 
 func (s *session) canActivateFromHostEdge(p point) bool {
@@ -685,6 +691,9 @@ func (s *session) canActivateFromHostEdge(p point) bool {
 		// desktop. With no other rects to probe, only its outer border
 		// activates.
 		return isOuterActivationEdgePoint(p, s.virtualDesktopRect(), nil, s.hostSide)
+	}
+	if !s.opts.EdgeAnyDisplay && !monitorOnDesktopBoundary(rect, s.monitorRects, s.hostSide) {
+		return false
 	}
 	return isOuterActivationEdgePoint(p, rect, s.monitorRects, s.hostSide)
 }

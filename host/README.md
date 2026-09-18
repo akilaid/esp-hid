@@ -97,22 +97,29 @@ in the environment overrides the lookup by name.
 ## Switching, on macOS
 
 **Switching: Auto** crosses to the device at a screen edge, exactly as on
-Windows — but macOS arms it differently, and deliberately so.
+Windows: reach the edge and you are across. Two settings shape it.
 
-On Windows, reaching the edge crosses. On a single-display Mac that is a bad
-trade: the Dock, the menu bar and every window's close button live on the same
-borders, so arriving at one is usually not an attempt to cross. macOS therefore
-requires the pointer to be **pushed against** the edge. Once it is stuck
-against the border the window server has nowhere to put it, so the location
-stops changing while the events keep reporting hardware deltas — someone
-reaching for the Dock decelerates and contributes almost nothing, someone
-crossing keeps shoving and contributes a lot. Only motion pointing *outward*
-counts, so running the pointer along a border never builds pressure, and it
-decays if you stop pushing for half a second.
+**Switch from any display's edge** (off by default) decides which displays
+may cross. Off, only the display that sits beside the device does. A taller
+display next to a shorter one exposes part of its own border past the
+neighbour, and that strip is an outer edge — nothing lies beyond it — but
+the device is not there, so crossing from it surprises more people than it
+helps. Turn it on if you want every edge facing the device to count.
 
-`edgeEntryPressureThreshold` in `internal/capture/geometry.go` is the dial. If
-accidental crossings happen, raise it; if a deliberate one feels like work,
-lower it.
+**Push to switch** (off by default) is the guard a single-display Mac needs.
+There the Dock, the menu bar and every window's close button live on the same
+borders, so arriving at one is usually not an attempt to cross. With it on,
+the pointer must be **pushed against** the edge. Once it is stuck against the
+border the window server has nowhere to put it, so the location stops
+changing while the events keep reporting hardware deltas — someone reaching
+for the Dock decelerates and contributes almost nothing, someone crossing
+keeps shoving and contributes a lot. Only motion pointing *outward* counts,
+so running the pointer along a border never builds pressure, and it decays
+if you stop pushing for half a second. **Push force** is the dial (default
+`200`, the built-in value): if accidental crossings happen, raise it; if a
+deliberate one feels like work, lower it. Windows cannot offer this — its
+hook reports absolute positions and has no motion left to measure once the
+pointer is clamped — so the setting is macOS only.
 
 **Device resolution** and the **arrangement picture** decide which border is
 the crossing point. Both matter even in Manual, since they also drive the
