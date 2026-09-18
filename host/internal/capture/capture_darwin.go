@@ -65,6 +65,11 @@ const (
 	// How long motion is withheld after a relocation if the pointer never
 	// shows up at the target — the event was lost, so stop waiting for it.
 	relocateSettleLimit = 500 * time.Millisecond
+	// How far in from a display's borders a Dock-clearing relocation lands.
+	// The Dock's tracking region is about 90px deep even at default size
+	// (measured); this leaves comfortable margin while keeping the target a
+	// short hop from the entry point rather than at the screen centre.
+	dockRelocationInset = 200
 )
 
 // session holds every piece of mutable capture state. It is created before
@@ -97,6 +102,10 @@ type session struct {
 	hidePending bool
 	hideRetries int
 	relocated   bool
+	// A kick event has been posted behind the relocation; its return is the
+	// earliest chance to hide, so the pointer is not left visible at the
+	// target until the user's next real move.
+	kickPosted bool
 	// After an exit the show is likewise verified on the motion events that
 	// follow, and repeated until the pointer is back.
 	showPending bool
@@ -266,9 +275,25 @@ func (s *session) handleEvent(eventType C.CGEventType, event C.CGEventRef) C.CGE
 	}
 
 	// Our own relocation on its way to the Dock. It must arrive there
-	// untouched, and its position jump is not motion for the device.
+	// untouched, and its position jump is not motion for the device. At this
+	// point in the pipeline the Dock is still tracking (the event has not
+	// reached the window server yet), so a hide here would be refused; a
+	// kick posted now returns just after the Dock lets go, and that is when
+	// the hide takes.
 	if C.ehbEventIsRelocation(event) != 0 {
+		if s.remoteModeActive && s.hidePending && !s.kickPosted {
+			s.kickPosted = true
+			go C.ehbPostKick(C.double(s.pinPoint.X), C.double(s.pinPoint.Y))
+		}
 		return event
+	}
+	// The kick, back from clearing the Dock: hide now, and swallow it so no
+	// mouse-moved reaches the app at the target.
+	if C.ehbEventIsKick(event) != 0 {
+		if s.remoteModeActive && s.hidePending {
+			s.verifyHide(true)
+		}
+		return C.ehbNullEvent()
 	}
 
 	s.maybeStall()
@@ -636,6 +661,7 @@ func (s *session) setRemoteMode(active bool, source string) {
 		s.hidePending = true
 		s.hideRetries = 0
 		s.relocated = false
+		s.kickPosted = false
 		s.verifyHide(false)
 		// Seed the shadow without emitting: the toggle hotkey itself often
 		// holds modifiers, and pressing Ctrl+Alt+F7 to enter must not send
@@ -717,7 +743,7 @@ func (s *session) verifyHide(motion bool) {
 	s.cursorHidden = false
 	if !s.relocated {
 		s.relocated = true
-		target := s.monitorCentre(s.pinPoint)
+		target := s.dockRelocationTarget(s.pinPoint)
 		s.relocating = true
 		s.relocateOrigin = s.pinPoint
 		s.relocateDeadline = time.Now().Add(relocateSettleLimit)
@@ -905,4 +931,16 @@ func (s *session) monitorCentre(p point) point {
 		return rect.centerPoint()
 	}
 	return s.virtualDesktopRect().centerPoint()
+}
+
+// dockRelocationTarget is where the pointer is sent to escape the Dock's
+// grip: a short hop in from the borders of the display it is on, near the
+// entry point rather than at the screen centre, so the instant it is visible
+// there is a small local blink over the desktop instead of a jump onto
+// whatever sits in the middle of the screen.
+func (s *session) dockRelocationTarget(p point) point {
+	if rect, found := s.findMonitor(p); found {
+		return insetPointIntoRect(p, rect, dockRelocationInset)
+	}
+	return insetPointIntoRect(p, s.virtualDesktopRect(), dockRelocationInset)
 }

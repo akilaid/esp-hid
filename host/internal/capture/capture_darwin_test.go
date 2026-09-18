@@ -207,7 +207,6 @@ func TestIntegrationHideSurvivesTheDock(t *testing.T) {
 		if event.Kind != EventRemoteMode {
 			continue
 		}
-		t.Logf("remote mode active=%v source=%s", event.Active, event.Source)
 		if event.Active {
 			entries++
 		} else if event.Source == "slave_edge" {

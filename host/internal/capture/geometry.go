@@ -456,6 +456,23 @@ func (p *edgeEntryPressure) push(dx, dy int, hostSide string, now time.Time) boo
 	return p.amount >= p.armThreshold()
 }
 
+// insetPointIntoRect pulls p inward so it sits at least inset from every
+// border of rect, moving only the coordinates that are too close to an edge.
+// It is how a relocation target is chosen near where the pointer already is
+// rather than at the monitor centre: clear of any Dock strip (which never
+// reaches this far in from an edge) but a short hop from the entry point, so
+// the unavoidable moment the pointer is visible at the target is a small
+// local blink and not a jump across the screen. If the rect is too small to
+// hold the inset, it falls back to the centre.
+func insetPointIntoRect(p point, rect monitorRect, inset int32) point {
+	minX, maxX := rect.Left+inset, rect.Right-1-inset
+	minY, maxY := rect.Top+inset, rect.Bottom-1-inset
+	if minX > maxX || minY > maxY {
+		return rect.centerPoint()
+	}
+	return point{X: clampInt32(p.X, minX, maxX), Y: clampInt32(p.Y, minY, maxY)}
+}
+
 // closerTo reports whether p is nearer to a than to b, in squared distance.
 func closerTo(p, a, b point) bool {
 	dax, day := int64(p.X-a.X), int64(p.Y-a.Y)

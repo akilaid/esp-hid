@@ -254,10 +254,21 @@ defect in the retired v1 macOS app:
   mouse. Warps never end the tracking (the Dock only sees events), and the
   Dock's window covers the whole display, so "over the Dock" cannot be read
   from geometry either. `ehbHideCursor` therefore asks `CGCursorIsVisible`
-  whether the hide took; when refused, `hideLocalCursor` posts one tagged
-  real event (`ehbPostRelocation`, recognised by `ehbEventIsRelocation` and
-  passed through the tap untouched so the Dock sees it) moving the pointer
-  to the monitor centre, and `retryHide` re-asks on the following events.
+  whether the hide took; when refused, `verifyHide` posts one tagged real
+  event (`ehbPostRelocation`, recognised by `ehbEventIsRelocation`) moving
+  the pointer just clear of the Dock. That event must pass through the tap:
+  swallowing it leaves the Dock tracking forever (measured — the tracking
+  ends only when the passed-through event reaches the window server, which
+  is *after* our tap sees it, so a hide on the relocation's own return is
+  still refused). Target is `dockRelocationTarget` — the entry point inset
+  ~200px from the display's borders, not the screen centre — so the instant
+  the pointer is unavoidably visible there is a local blink near the corner,
+  not a jump onto whatever sits in the middle. And because the earliest a
+  hide can succeed is the *next* event, a `ehbPostKick` is queued right
+  behind the relocation; its return (swallowed, so the app gets no extra
+  mouse-moved) is a millisecond or two later, when the Dock has let go, so
+  the pointer is hidden sub-frame rather than waiting for the user's next
+  real move. `verifyHide` still re-asks on real motion as a fallback.
   Measured hide-count semantics: a refused hide does not count, a taken one
   does (two hides need two shows), shows past zero are harmless, a hide is
   reflected synchronously and a show only after ~150µs, and

@@ -267,6 +267,24 @@ int ehbEventIsRelocation(CGEventRef event) {
   return CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kEhbRelocationTag;
 }
 
+// "EHBKICK\0" — distinct from the relocation tag.
+static const int64_t kEhbKickTag = 0x4548424B49434B00LL;
+
+void ehbPostKick(double x, double y) {
+  CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
+                                             CGPointMake(x, y), kCGMouseButtonLeft);
+  if (!event) {
+    return;
+  }
+  CGEventSetIntegerValueField(event, kCGEventSourceUserData, kEhbKickTag);
+  CGEventPost(kCGHIDEventTap, event);
+  CFRelease(event);
+}
+
+int ehbEventIsKick(CGEventRef event) {
+  return CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kEhbKickTag;
+}
+
 int ehbShowCursor(int force) {
   if (gCursorHidden || force) {
     CGDisplayShowCursor(kCGDirectMainDisplay);
