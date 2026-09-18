@@ -91,6 +91,92 @@ func TestIntegrationF19Toggle(t *testing.T) {
 	}
 }
 
+// TestIntegrationHideSurvivesTheDock enters remote mode with the pointer in
+// the corner beside the Dock, which is where the hide used to be refused and
+// the pointer then wandered the desktop, visible, while the device moved
+// too. The Dock tracks the pointer from the first mouse event in its strip
+// (the empty part beside the tiles included) until one lands outside, and a
+// tracked pointer can be neither hidden nor warped. The fix sends it away
+// with a real event and retries the hide; this asks the window server, not
+// the session, whether the pointer ended up hidden.
+//
+// With the Dock on another side or hidden, the corner is ordinary and the
+// hide takes at once — the test then passes trivially.
+func TestIntegrationHideSurvivesTheDock(t *testing.T) {
+	if os.Getenv("ESP_HID_CAPTURE_INTEGRATION") != "1" {
+		t.Skip("set ESP_HID_CAPTURE_INTEGRATION=1 to run (briefly grabs system input)")
+	}
+	if perms := CheckPermissions(); !perms.OK(true) {
+		t.Skipf("missing permissions: %s", perms.PermissionHint(true))
+	}
+
+	events := make(chan Event, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Options{
+			CaptureKeyboard: true,
+			ToggleHotkey:    "F9",
+			SlaveWidth:      1080,
+			SlaveHeight:     1920,
+			HostSide:        HostSideRight,
+			AutoSwitch:      false, // enter by hotkey so the corner itself is not the trigger
+		}, events, func() bool { return true })
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	// A real event in the bottom-left corner: the Dock strip on a default
+	// desktop, and where the report came from.
+	_, height := mainDisplaySize()
+	syntheticMouseMoveTo(4, height-4, -2)
+	time.Sleep(150 * time.Millisecond)
+
+	syntheticKey(testKeyF9, true)
+	syntheticKey(testKeyF9, false)
+
+	// The retries ride on events; keep some coming, as a hand would.
+	hidden := false
+	for i := 0; i < 20 && !hidden; i++ {
+		syntheticMouseMove(1, 0)
+		time.Sleep(50 * time.Millisecond)
+		hidden = !cursorVisible()
+	}
+
+	syntheticKey(testKeyF9, true)
+	syntheticKey(testKeyF9, false)
+	time.Sleep(200 * time.Millisecond)
+	restored := cursorVisible()
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+	close(events)
+
+	entered := false
+	for event := range events {
+		if event.Kind == EventRemoteMode && event.Active {
+			entered = true
+		}
+	}
+	if !entered {
+		t.Fatal("the hotkey did not enter remote mode")
+	}
+	if !hidden {
+		t.Error("the local pointer was still visible a second after entering remote mode beside the Dock")
+	}
+	if !restored {
+		t.Error("the pointer did not come back after leaving remote mode")
+	}
+}
+
 // TestIntegrationEdgeEntryPersists checks that reaching the host-side screen
 // edge activates remote mode and that it stays activated.
 //

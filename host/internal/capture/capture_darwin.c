@@ -223,11 +223,40 @@ static int ehbActiveDisplays(CGDirectDisplayID *ids, uint32_t max) {
 // The flag makes both calls idempotent, so a re-assert costs nothing.
 static int gCursorHidden = 0;
 
-void ehbHideCursor(void) {
+int ehbHideCursor(void) {
   if (!gCursorHidden) {
     CGDisplayHideCursor(kCGDirectMainDisplay);
     gCursorHidden = 1;
   }
+  // Ask rather than assume. Deprecated since 10.9 and still the only way to
+  // learn whether the hide took; a refused one must not be counted as ours,
+  // or the matching show would leave the count wrong.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  if (CGCursorIsVisible()) {
+#pragma clang diagnostic pop
+    gCursorHidden = 0;
+    return 0;
+  }
+  return 1;
+}
+
+// "EHBRELOC" — an arbitrary value no real event carries in its user data.
+static const int64_t kEhbRelocationTag = 0x45484252454C4F43LL;
+
+void ehbPostRelocation(double x, double y) {
+  CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
+                                             CGPointMake(x, y), kCGMouseButtonLeft);
+  if (!event) {
+    return;
+  }
+  CGEventSetIntegerValueField(event, kCGEventSourceUserData, kEhbRelocationTag);
+  CGEventPost(kCGHIDEventTap, event);
+  CFRelease(event);
+}
+
+int ehbEventIsRelocation(CGEventRef event) {
+  return CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kEhbRelocationTag;
 }
 
 void ehbShowCursor(void) {
