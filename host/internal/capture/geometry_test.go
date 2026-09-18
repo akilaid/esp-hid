@@ -21,6 +21,27 @@ var (
 	desktopTall = []monitorRect{monitorA, monitorTall}
 )
 
+func TestInsetPointIntoRect(t *testing.T) {
+	rect := monitorRect{Left: 0, Top: 0, Right: 1920, Bottom: 1080}
+	// Bottom-left corner (a Dock corner) pulls in on both axes.
+	if got := insetPointIntoRect(point{X: 2, Y: 1078}, rect, 200); got != (point{X: 200, Y: 879}) {
+		t.Errorf("corner inset = %v, want {200 879}", got)
+	}
+	// Mid-left edge pulls in only on x, keeping the entry row.
+	if got := insetPointIntoRect(point{X: 0, Y: 540}, rect, 200); got != (point{X: 200, Y: 540}) {
+		t.Errorf("mid-left inset = %v, want {200 540}", got)
+	}
+	// Already clear of every edge: unchanged.
+	if got := insetPointIntoRect(point{X: 960, Y: 540}, rect, 200); got != (point{X: 960, Y: 540}) {
+		t.Errorf("interior point moved: %v", got)
+	}
+	// A rect too small for the inset falls back to its centre.
+	tiny := monitorRect{Left: 0, Top: 0, Right: 100, Bottom: 100}
+	if got := insetPointIntoRect(point{X: 0, Y: 0}, tiny, 200); got != tiny.centerPoint() {
+		t.Errorf("tiny rect = %v, want centre %v", got, tiny.centerPoint())
+	}
+}
+
 func TestCloserTo(t *testing.T) {
 	corner := point{X: 0, Y: 1075}
 	centre := point{X: 960, Y: 540}

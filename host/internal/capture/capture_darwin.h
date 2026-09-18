@@ -105,9 +105,19 @@ int ehbShowCursor(int force);
 // it. This is how the pointer is taken away from the Dock: only an event
 // makes the Dock stop tracking, and a tracked pointer can be neither hidden
 // nor warped. The tap must pass the event through untouched, or the Dock
-// never sees it.
+// never sees it (measured: swallowing it leaves the Dock tracking forever).
 void ehbPostRelocation(double x, double y);
 int ehbEventIsRelocation(CGEventRef event);
+
+// A second tagged event, posted right behind a relocation, to the same
+// spot. When it returns through the tap the relocation ahead of it has been
+// processed and the Dock has let go, so this is the earliest event on which
+// the hide succeeds — a millisecond or two after the relocation, rather than
+// whenever the user next moves the mouse, which is the difference between a
+// sub-frame blip and a pointer sitting visible at the target. It carries no
+// new position, so the tap swallows it: the app never sees it.
+void ehbPostKick(double x, double y);
+int ehbEventIsKick(CGEventRef event);
 void ehbCursorPosition(double *x, double *y);
 uint64_t ehbCurrentFlags(void);
 // Fills out with {x, y, w, h} per display; returns the number written.

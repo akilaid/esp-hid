@@ -22,6 +22,13 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   A hide the window server did not take is undone before it is retried,
   and after leaving remote mode the pointer is shown again on the next
   mouse movements until the window server confirms it is back.
+- **macOS: switching from beside the Dock no longer flashes the pointer at
+  the middle of the screen.** Escaping the Dock's grip needs one real mouse
+  event, which used to jump the pointer to the display centre and briefly
+  highlight whatever sat there. It now lands a short hop in from the corner
+  the switch came from, over empty space, and is hidden a millisecond or
+  two later instead of waiting for the next mouse movement — a local blink
+  rather than a jump across the screen.
 
 ## [2.5.0] — 2026-09-18
 
