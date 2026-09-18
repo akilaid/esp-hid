@@ -456,6 +456,13 @@ func (p *edgeEntryPressure) push(dx, dy int, hostSide string, now time.Time) boo
 	return p.amount >= p.armThreshold()
 }
 
+// closerTo reports whether p is nearer to a than to b, in squared distance.
+func closerTo(p, a, b point) bool {
+	dax, day := int64(p.X-a.X), int64(p.Y-a.Y)
+	dbx, dby := int64(p.X-b.X), int64(p.Y-b.Y)
+	return dax*dax+day*day < dbx*dbx+dby*dby
+}
+
 func clampInt(value, minValue, maxValue int) int {
 	if maxValue < minValue {
 		return minValue

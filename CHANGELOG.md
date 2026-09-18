@@ -42,7 +42,10 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   the bridge's hide and its pinning, and only a real mouse event outside the
   Dock ends the tracking. The bridge now checks that the hide took and, if
   not, moves the pointer to the middle of the display with one real event
-  and hides it there.
+  and hides it there. The first mouse event after such a move reports the
+  whole jump as its motion, which from a corner reads as a push back past
+  the device's edge; that event is dropped, so the switch holds instead of
+  bouncing straight back.
 
 ## [2.4.7] — 2026-09-15
 

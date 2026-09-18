@@ -254,9 +254,18 @@ defect in the retired v1 macOS app:
   passed through the tap untouched so the Dock sees it) moving the pointer
   to the monitor centre, and `retryHide` re-asks on the following events.
   A refused hide does not count against the connection (measured: one show
-  undoes a later successful one). `TestIntegrationHideSurvivesTheDock` pins
-  it. Keep `pinPoint` internal — nothing may depend on where the hidden
-  pointer sits, since the relocation moves it.
+  undoes a later successful one). Keep `pinPoint` internal — nothing may
+  depend on where the hidden pointer sits, since the relocation moves it.
+  **A posted move is not a warp**: the first hardware event generated after
+  it reports the whole jump as its delta (measured: dx=-74 dy=246 for a
+  75x249 relocation, on the first event located at the target; events still
+  in flight at the old position are clean), whereas warps never do. From a
+  corner that jump is a shove past the device's far edge for the
+  return-pressure model, so `settleRelocation` withholds motion until an
+  event arrives nearer the target than the origin and drops that one too.
+  `TestIntegrationHideSurvivesTheDock` plays the jump the way hardware does
+  and pins both halves. The suite needs the installed bridge quit: two
+  active taps fight over the same synthetic events.
 
 Never block in the tap callback — only the non-blocking `publish` is allowed.
 `-debug-stall-capture` deliberately stalls it to exercise the recovery path.
