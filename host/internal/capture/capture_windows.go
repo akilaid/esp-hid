@@ -402,6 +402,10 @@ func Run(ctx context.Context, opts Options, out chan<- Event, activationAllowedF
 	}
 	if cursorPoint, ok := currentCursorPoint(); ok {
 		setRemoteAnchorForPoint(cursorPoint)
+		// A pointer already on the activation edge must leave it before it
+		// can cross: the previous session's exit parks it exactly there,
+		// and a session that starts armed enters on the first jiggle.
+		edgeArmed = !canActivateFromHostEdge(cursorPoint)
 	}
 	slaveCursor.resetForActivation("hotkey")
 

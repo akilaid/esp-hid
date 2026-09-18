@@ -223,18 +223,26 @@ static int ehbActiveDisplays(CGDirectDisplayID *ids, uint32_t max) {
 // The flag makes both calls idempotent, so a re-assert costs nothing.
 static int gCursorHidden = 0;
 
+// Deprecated since 10.9 and still the only way to ask the window server
+// rather than assume. Global: it also reads false while macOS hides the
+// pointer for typing, so callers confirm on mouse motion, which ends that.
+static int ehbCursorVisible(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  return CGCursorIsVisible() ? 1 : 0;
+#pragma clang diagnostic pop
+}
+
 int ehbHideCursor(void) {
   if (!gCursorHidden) {
     CGDisplayHideCursor(kCGDirectMainDisplay);
     gCursorHidden = 1;
   }
-  // Ask rather than assume. Deprecated since 10.9 and still the only way to
-  // learn whether the hide took; a refused one must not be counted as ours,
-  // or the matching show would leave the count wrong.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  if (CGCursorIsVisible()) {
-#pragma clang diagnostic pop
+  if (ehbCursorVisible()) {
+    // Refused, or counted and overridden — no way to tell, so undo it
+    // either way. An unneeded show is harmless (measured: the next hide
+    // still takes); an unmatched hide is a pointer that never comes back.
+    CGDisplayShowCursor(kCGDirectMainDisplay);
     gCursorHidden = 0;
     return 0;
   }
@@ -259,11 +267,12 @@ int ehbEventIsRelocation(CGEventRef event) {
   return CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kEhbRelocationTag;
 }
 
-void ehbShowCursor(void) {
-  if (gCursorHidden) {
+int ehbShowCursor(int force) {
+  if (gCursorHidden || force) {
     CGDisplayShowCursor(kCGDirectMainDisplay);
     gCursorHidden = 0;
   }
+  return ehbCursorVisible();
 }
 
 void ehbCursorPosition(double *x, double *y) {

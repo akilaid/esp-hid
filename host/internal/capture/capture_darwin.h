@@ -87,10 +87,20 @@ void ehbSetLocalEventsSuppression(double seconds);
 // Returns non-zero when the window server agrees the cursor is now hidden.
 // It refuses while the Dock is tracking the pointer — from the moment a
 // mouse *event* lands anywhere in the Dock's strip until one lands outside
-// it; warps do not count either way — and a refused hide leaves nothing to
-// undo (measured: it does not add to the hide count). See ehbPostRelocation.
+// it; warps do not count either way. See ehbPostRelocation.
+//
+// A hide that did not take is undone with a show before returning, so hides
+// and shows always pair off whatever the window server made of it. Without
+// that, a hide it counted but overrode was hidden again on every retry, and
+// the single show on exit could not bring the pointer back.
 int ehbHideCursor(void);
-void ehbShowCursor(void);
+// Shows the cursor if this session hid it, or unconditionally when force is
+// set — for a caller that has confirmed on a later event that the pointer
+// is still missing and wants to unwind a hide count it did not know about.
+// Returns non-zero when the window server reports the cursor visible. A
+// show takes ~150us to be reflected (measured; a hide is immediate), so the
+// value read straight after one is stale: confirm on a later event.
+int ehbShowCursor(int force);
 // Posts a real mouse-moved event to (x, y), tagged so the tap can recognise
 // it. This is how the pointer is taken away from the Dock: only an event
 // makes the Dock stop tracking, and a tracked pointer can be neither hidden

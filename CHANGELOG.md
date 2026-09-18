@@ -8,6 +8,21 @@ The project has two generations. **2.x** is the current one: ESP-IDF firmware
 (`firmware/`) with a Windows-only sender (`software/`); it speaks a different
 wire protocol, is not interchangeable with 2.x, and is no longer released.
 
+## [2.5.3] — 2026-09-18
+
+### Fixed
+
+- **Relaunching with the pointer on the edge no longer switches on the
+  first nudge.** Leaving remote mode parks the pointer on the activation
+  edge, and a new session started ready to cross from there, so the next
+  jiggle after a relaunch hid the pointer and sent input to the device —
+  the app looked broken. A session whose pointer begins on the edge now
+  waits for it to leave first. Both platforms.
+- **macOS: the pointer's hide and show are verified, and always balanced.**
+  A hide the window server did not take is undone before it is retried,
+  and after leaving remote mode the pointer is shown again on the next
+  mouse movements until the window server confirms it is back.
+
 ## [2.5.0] — 2026-09-18
 
 ### Added
@@ -327,6 +342,7 @@ wire protocol, is not interchangeable with 2.x, and is no longer released.
   icon, configurable toggle hotkey, remote-mode mouse and button handling, and
   a build/release workflow.
 
+[2.5.3]: https://github.com/akilaid/esp-hid/compare/v2.5.2...v2.5.3
 [2.5.0]: https://github.com/akilaid/esp-hid/compare/v2.4.7...v2.5.0
 [2.4.7]: https://github.com/akilaid/esp-hid/compare/v2.4.6...v2.4.7
 [2.4.6]: https://github.com/akilaid/esp-hid/compare/v2.4.5...v2.4.6
